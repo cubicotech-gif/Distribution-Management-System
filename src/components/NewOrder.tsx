@@ -2,7 +2,7 @@
 import { useMemo, useState } from "react";
 import { Trash2, ClipboardPaste, Sparkles } from "lucide-react";
 import { useStore, useUser } from "@/lib/store";
-import { available, fmt, lineNet, rateFor, totals } from "@/lib/calc";
+import { available, fmt, lineNet, rateFor, totals, withScheme } from "@/lib/calc";
 import type { Line, Product, Unit } from "@/lib/types";
 import { Kbd, Modal, Thumb, toast } from "./ui";
 
@@ -32,13 +32,15 @@ export default function NewOrder({ onClose, onCreated, defaultCustomer }: { onCl
   const products = useStore((s) => s.products);
   const orders = useStore((s) => s.orders);
   const create = useStore((s) => s.createOrder);
+  const schemes = useStore((s) => s.schemes);
   const user = useUser();
   const [cid, setCid] = useState(defaultCustomer ?? customers[0]?.id);
   const [lines, setLines] = useState<Line[]>([]);
   const [paste, setPaste] = useState("");
   const [q, setQ] = useState("");
   const c = customers.find((x) => x.id === cid);
-  const t = totals(lines);
+  const priced = lines.map((l) => withScheme(schemes, l));
+  const t = totals(priced);
 
   const matches = useMemo(() => {
     const ql = q.toLowerCase().trim();
@@ -122,7 +124,7 @@ export default function NewOrder({ onClose, onCreated, defaultCustomer }: { onCl
                   const p = products.find((x) => x.id === l.productId)!;
                   return (
                     <tr key={i} className="border-t border-line">
-                      <td className="px-3 py-1.5"><div className="flex items-center gap-2"><Thumb p={p} size={22} />{p.name}</div></td>
+                      <td className="px-3 py-1.5"><div className="flex items-center gap-2"><Thumb p={p} size={22} /><div>{p.name}{priced[i].scheme && <div className="text-[10.5px] font-medium text-accent">{priced[i].scheme}</div>}</div></div></td>
                       <td>
                         <select className="cell !text-left" value={l.unit} onChange={(e) => { const u = e.target.value as Unit; setLines(lines.map((x, k) => k === i ? { ...x, unit: u, rate: rateFor(p, u) } : x)); }}>
                           <option value="ctn">Carton</option><option value="pcs">Pcs</option>
@@ -130,7 +132,7 @@ export default function NewOrder({ onClose, onCreated, defaultCustomer }: { onCl
                       </td>
                       <td className="w-20"><input className="cell num font-semibold" type="number" min={1} value={l.qty} onChange={(e) => setLines(lines.map((x, k) => k === i ? { ...x, qty: Math.max(0, +e.target.value) } : x))} /></td>
                       <td className="num text-right text-ink2">{fmt(l.rate)}</td>
-                      <td className="num text-right font-semibold">{fmt(lineNet(l))}</td>
+                      <td className="num text-right font-semibold">{fmt(lineNet(priced[i]))}</td>
                       <td className="w-9 text-center"><button className="text-ink3 hover:text-[var(--bad-fg)]" onClick={() => setLines(lines.filter((_, k) => k !== i))}><Trash2 size={14} /></button></td>
                     </tr>
                   );

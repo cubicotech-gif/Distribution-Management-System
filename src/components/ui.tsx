@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import type { Customer, OrderStatus, Product } from "@/lib/types";
-import { creditUsedPct } from "@/lib/calc";
+import { aging, BUCKETS, creditUsedPct } from "@/lib/calc";
 import { useStore } from "@/lib/store";
 
 export function useHydrated() {
@@ -86,21 +86,17 @@ export function CreditMeter({ c }: { c: Customer }) {
 }
 
 export function AgingBar({ c }: { c: Customer }) {
-  // illustrative split of balance across age buckets, driven by oldest due
-  const b = c.balance;
-  const d = c.oldestDue;
-  const w = d > 60 ? [0.3, 0.2, 0.2, 0.3] : d > 30 ? [0.4, 0.3, 0.3, 0] : d > 15 ? [0.65, 0.35, 0, 0] : [1, 0, 0, 0];
+  const orders = useStore((s) => s.orders);
+  const b = aging(orders, c);
+  const total = b.reduce((x, y) => x + y, 0) || 1;
   const cols = ["var(--ok-fg)", "#d9a319", "#e07a2b", "#d9483b"];
-  const labels = ["0-30", "31-60", "61-90", "90+"];
   return (
     <div>
-      <div className="flex h-1.5 w-full overflow-hidden rounded-full gap-px" style={{ background: "var(--mute-bg)" }}>
-        {w.map((x, i) => x > 0 && <div key={i} style={{ width: `${x * 100}%`, background: cols[i] }} />)}
+      <div className="flex h-1.5 w-full gap-px overflow-hidden rounded-full" style={{ background: "var(--mute-bg)" }}>
+        {b.map((x, i) => x > 0 && <div key={i} style={{ width: `${(x / total) * 100}%`, background: cols[i] }} />)}
       </div>
       <div className="mt-1 flex gap-2 text-[10.5px] text-ink3">
-        {w.map((x, i) => x > 0 && (
-          <span key={i} className="num">{labels[i]}d {Math.round((b * x) / 1000)}k</span>
-        ))}
+        {b.map((x, i) => x > 0 && <span key={i} className="num">{BUCKETS[i]}d {Math.round(x / 1000)}k</span>)}
       </div>
     </div>
   );

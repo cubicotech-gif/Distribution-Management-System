@@ -3,8 +3,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Route as RouteIcon, ClipboardList, Boxes, Truck, Wallet, LogOut, Moon, Sun, ChevronLeft, Minus, Plus, MapPin } from "lucide-react";
 import { useStore, useUser } from "@/lib/store";
-import { available, creditUsedPct, fmt, lineNet, orderTotal, rateFor, totals, ago } from "@/lib/calc";
-import type { Customer, Line, Order, Product, Unit } from "@/lib/types";
+import { available, creditUsedPct, fmt, lineNet, orderTotal, rateFor, totals, ago, withScheme } from "@/lib/calc";
+import type { Customer, Line, Product, ReturnReason, Unit } from "@/lib/types";
 import { Avatar, CreditMeter, Meter, StatusChip, Thumb, Toaster, toast, useHydrated } from "@/components/ui";
 import { useTheme } from "@/components/AppShell";
 
@@ -114,10 +114,12 @@ function NewOrderM({ customerId, onBack, onDone }: { customerId: string; onBack:
   const products = useStore((s) => s.products);
   const orders = useStore((s) => s.orders);
   const create = useStore((s) => s.createOrder);
+  const schemes = useStore((s) => s.schemes);
   const [lines, setLines] = useState<Line[]>([]);
   const [q, setQ] = useState("");
   const last = orders.find((o) => o.customerId === c.id && o.status !== "cancelled");
-  const t = totals(lines);
+  const priced = lines.map((l) => withScheme(schemes, l));
+  const t = totals(priced);
   const hits = q ? products.filter((p) => (p.name + p.code).toLowerCase().includes(q.toLowerCase())).slice(0, 5) : [];
   const set = (i: number, patch: Partial<Line>) => setLines(lines.map((l, k) => (k === i ? { ...l, ...patch } : l)));
   const add = (p: Product) => { setLines((ls) => ls.some((l) => l.productId === p.id) ? ls.map((l) => l.productId === p.id ? { ...l, qty: l.qty + 1 } : l) : [...ls, { productId: p.id, unit: "ctn", qty: 1, rate: rateFor(p, "ctn"), discPct: 0 }]); setQ(""); };
@@ -151,8 +153,8 @@ function NewOrderM({ customerId, onBack, onDone }: { customerId: string; onBack:
             <div key={i} className="panel p-3">
               <div className="flex items-center gap-3">
                 <Thumb p={p} size={40} />
-                <div className="min-w-0 flex-1"><div className="truncate text-[14px] font-semibold">{p.name}</div><div className="num text-xs text-ink3">Rs. {fmt(l.rate)} / {l.unit}</div></div>
-                <div className="num text-[14px] font-bold">{fmt(lineNet(l))}</div>
+                <div className="min-w-0 flex-1"><div className="truncate text-[14px] font-semibold">{p.name}</div><div className="num text-xs text-ink3">Rs. {fmt(l.rate)} / {l.unit}</div>{priced[i].scheme && <div className="text-[11px] font-semibold text-accent">{priced[i].scheme}</div>}</div>
+                <div className="num text-[14px] font-bold">{fmt(lineNet(priced[i]))}</div>
               </div>
               <div className="mt-2.5 flex items-center gap-2">
                 <div className="flex rounded-lg border border-line2 p-0.5 text-xs font-semibold">
@@ -218,26 +220,57 @@ function StockView() {
 function TripView() {
   const orders = useStore((s) => s.orders);
   const customers = useStore((s) => s.customers);
+  const products = useStore((s) => s.products);
+  const trips = useStore((s) => s.trips);
   const deliver = useStore((s) => s.deliverOrder);
+  const report = useStore((s) => s.reportReturn);
   const user = useUser()!;
-  const mine = orders.filter((o) => o.status === "invoiced");
-  const done = orders.filter((o) => o.status === "delivered" || o.status === "paid").slice(0, 3);
+  const [ret, setRet] = useState<string | null>(null);
+  const [pid, setPid] = useState("");
+  const [qty, setQty] = useState(1);
+  const [reason, setReason] = useState<ReturnReason>("refused");
+  const myTrips = trips.filter((t) => t.driverId === user.id && t.status !== "closed");
+  const out = myTrips.filter((t) => t.status === "out");
+  const stops = out.flatMap((t) => t.orderIds.map((id) => orders.find((o) => o.id === id)!)).filter(Boolean);
+  const todo = stops.filter((o) => o.status === "invoiced");
+  const done = stops.filter((o) => o.status !== "invoiced");
+  const waiting = myTrips.filter((t) => t.status === "loading");
+  const rOrder = orders.find((o) => o.id === ret);
   return (
     <div className="space-y-3 p-4">
-      <div><div className="th">Trip sheet</div><div className="text-[20px] font-bold">{mine.length} deliveries to go</div></div>
-      {mine.map((o) => {
+      <div><div className="th">Trip sheet · {out[0]?.folio ?? "no trip"}</div><div className="text-[20px] font-bold">{todo.length} deliveries to go</div></div>
+      {waiting.length > 0 && <div className="rounded-xl border border-line bg-panel p-3 text-xs text-ink2">{waiting[0].folio} is being loaded at the warehouse. You will see the stops when it is dispatched.</div>}
+      {todo.map((o, i) => {
         const c = customers.find((x) => x.id === o.customerId)!;
         return (
           <div key={o.id} className="panel p-3.5">
-            <div className="flex items-start justify-between"><div><div className="text-[15px] font-semibold">{c.name}</div><div className="flex items-center gap-1 text-[11.5px] text-ink3"><MapPin size={12} />{c.area} · {c.phone}</div></div><span className="num font-bold">{fmt(orderTotal(o))}</span></div>
-            <div className="num mt-2 text-xs text-ink2">{o.invoiceNo} · {o.lines.length} items · {o.lines.reduce((s, l) => s + l.qty, 0)} {o.lines[0]?.unit}</div>
-            <button className="btn btn-primary mt-3 h-12 w-full justify-center text-[15px]" onClick={() => { deliver(o.id, user.initials); toast("Marked delivered. KE will collect the signature"); }}>Mark delivered ✓</button>
+            <div className="flex items-start justify-between">
+              <div className="flex gap-3"><span className="num grid h-7 w-7 place-items-center rounded-full bg-accentsoft text-[12px] font-bold text-accent">{i + 1}</span><div><div className="text-[15px] font-semibold">{c.name}</div><div className="flex items-center gap-1 text-[11.5px] text-ink3"><MapPin size={12} />{c.area} · {c.phone}</div></div></div>
+              <span className="num text-xs text-ink2">{o.invoiceNo}</span>
+            </div>
+            <div className="mt-2 space-y-0.5 text-xs text-ink2">{o.lines.map((l, k) => <div key={k} className="flex justify-between"><span>{products.find((p) => p.id === l.productId)?.name}</span><span className="num font-semibold">{l.qty} {l.unit}</span></div>)}</div>
+            <div className="mt-3 flex gap-2">
+              <button className="btn h-12 flex-1 justify-center" onClick={() => { setRet(o.id); setPid(o.lines[0].productId); setQty(1); }}>Return / refuse</button>
+              <button className="btn btn-primary h-12 flex-[2] justify-center text-[15px]" onClick={() => { deliver(o.id, user.initials); toast("Delivered. KE will collect the signature"); }}>Delivered ✓</button>
+            </div>
           </div>
         );
       })}
-      {mine.length === 0 && <div className="py-12 text-center text-ink3">All deliveries done. New ones appear when billing issues invoices.</div>}
-      {done.length > 0 && <div className="th pt-2">Done today</div>}
+      {todo.length === 0 && out.length > 0 && <div className="py-8 text-center text-ink3">All stops done. Head back to the depot.</div>}
+      {out.length === 0 && waiting.length === 0 && <div className="py-12 text-center text-ink3">No trip assigned. The warehouse creates a load sheet when invoices are ready.</div>}
+      {done.length > 0 && <div className="th pt-2">Done</div>}
       {done.map((o) => <div key={o.id} className="flex items-center justify-between rounded-xl border border-line px-3 py-2.5 text-ink2"><span>{customers.find((c) => c.id === o.customerId)?.name}</span><StatusChip status={o.status} /></div>)}
+      {rOrder && (
+        <div className="fixed inset-0 z-50 flex items-end bg-black/40" onClick={() => setRet(null)}>
+          <div className="mx-auto w-full max-w-[430px] space-y-3 rounded-t-2xl bg-panel p-4" onClick={(e) => e.stopPropagation()}>
+            <div className="text-[16px] font-bold">Goods coming back</div>
+            <select className="field h-11" value={pid} onChange={(e) => setPid(e.target.value)}>{rOrder.lines.map((l) => <option key={l.productId} value={l.productId}>{products.find((p) => p.id === l.productId)?.name}</option>)}</select>
+            <div className="flex gap-2"><input className="field num h-11 flex-1 text-[16px] font-bold" type="number" inputMode="numeric" value={qty} onChange={(e) => setQty(Math.max(1, +e.target.value))} /><span className="grid place-items-center text-xs text-ink2">pcs</span>
+              <select className="field h-11 flex-[2]" value={reason} onChange={(e) => setReason(e.target.value as ReturnReason)}>{["refused", "damaged", "expired", "wrong item", "old packaging"].map((r) => <option key={r}>{r}</option>)}</select></div>
+            <button className="btn btn-primary h-12 w-full justify-center text-[15px]" onClick={() => { report(rOrder.id, pid, qty, reason, user.initials); toast("Return noted. Bring it back to the warehouse"); setRet(null); }}>Save return</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -270,8 +303,10 @@ function CollectView() {
   const payments = useStore((s) => s.payments);
   const user = useUser()!;
   const [amt, setAmt] = useState<Record<string, number>>({});
-  const open = useMemo(() => orders.filter((o) => o.status === "delivered" && !o.filed), [orders]);
-  const cash = payments.filter((p) => p.by === user.initials && Date.now() - p.at < 86400000).reduce((s, p) => s + p.amount, 0);
+  const trips = useStore((s) => s.trips);
+  const mine = trips.filter((t) => t.keId === user.id && t.status !== "closed").flatMap((t) => t.orderIds);
+  const open = useMemo(() => orders.filter((o) => mine.includes(o.id) && o.status === "delivered" && !o.filed), [orders, mine]); // eslint-disable-line react-hooks/exhaustive-deps
+  const cash = payments.filter((p) => p.by === user.initials && p.mode === "cash" && Date.now() - p.at < 86400000).reduce((s, p) => s + p.amount, 0);
   return (
     <div className="space-y-3 p-4">
       <div className="flex items-end justify-between"><div><div className="th">KE · recovery</div><div className="text-[20px] font-bold">{open.length} to sign & collect</div></div>

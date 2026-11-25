@@ -9,10 +9,10 @@ const ICON: Record<string, React.ReactNode> = {
   purchasing: <PackageCheck size={18} />, booker: <Smartphone size={18} />, delivery: <Truck size={18} />, recovery: <Wallet size={18} />,
 };
 const DESC: Record<string, string> = {
-  admin: "Everything: users, masters, prices, reports",
-  sales: "Approve orders, invoice, post recovery",
-  warehouse: "Receive stock, pick, challans, returns",
-  purchasing: "Factory POs and GRN approval",
+  admin: "Read-only dashboards, approvals for exceptions, reports, team targets",
+  sales: "Orders, invoices, recovery, trip settlement, customers and prices",
+  warehouse: "Receive and count, pick by expiry, load trucks, inspect returns",
+  purchasing: "Reorder planner, factory POs, GRN approval, supplier returns",
   booker: "Mobile: route, book orders, live stock",
   delivery: "Mobile: today's deliveries, signature",
   recovery: "Mobile: collect payments, day-end cash",

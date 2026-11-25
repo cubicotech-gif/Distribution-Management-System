@@ -1,12 +1,12 @@
 "use client";
 import { useState } from "react";
-import { Plus, Pencil, Trash2 } from "lucide-react";
+import { Plus, Pencil, Trash2, FileText } from "lucide-react";
 import { useStore, useUser } from "@/lib/store";
-import { fmt } from "@/lib/calc";
+import { fmt, creditUsedPct } from "@/lib/calc";
 import type { Customer } from "@/lib/types";
 import MasterForm from "@/components/MasterForm";
+import Statement from "@/components/Statement";
 import { Avatar, Meter, toast } from "@/components/ui";
-import { creditUsedPct } from "@/lib/calc";
 
 export default function Customers() {
   const customers = useStore((s) => s.customers);
@@ -14,17 +14,21 @@ export default function Customers() {
   const upsert = useStore((s) => s.upsertCustomer);
   const del = useStore((s) => s.deleteCustomer);
   const user = useUser();
-  const canEdit = user?.role === "admin";
+  const canEdit = user?.role === "sales";
   const [q, setQ] = useState("");
+  const [route, setRoute] = useState("all");
   const [edit, setEdit] = useState<Customer | null>(null);
+  const [stmt, setStmt] = useState<Customer | null>(null);
   const bookers = users.filter((u) => u.role === "booker");
-  const blank: Customer = { id: `c${Date.now()}`, name: "", area: "", route: "", bookerId: bookers[0].id, type: "credit", creditLimit: 100000, creditDays: 15, balance: 0, oldestDue: 0, phone: "" };
-  const rows = customers.filter((c) => (c.name + c.area).toLowerCase().includes(q.toLowerCase()));
+  const routes = Array.from(new Set(customers.map((c) => c.route)));
+  const blank: Customer = { id: `c${Date.now()}`, name: "", area: "", route: routes[0] ?? "", bookerId: bookers[0].id, type: "credit", creditLimit: 100000, creditDays: 15, balance: 0, oldestDue: 0, phone: "" };
+  const rows = customers.filter((c) => (c.name + c.area).toLowerCase().includes(q.toLowerCase()) && (route === "all" || c.route === route));
   return (
     <div className="flex h-full flex-col gap-3">
       <div className="flex items-center gap-3">
         <input className="field max-w-xs" placeholder="Search customers…" value={q} onChange={(e) => setQ(e.target.value)} />
-        {canEdit ? <button className="btn btn-primary ml-auto" onClick={() => setEdit(blank)}><Plus size={14} /> Add customer</button> : <span className="ml-auto text-xs text-ink3">Only Admin can edit customers</span>}
+        <select className="field w-44" value={route} onChange={(e) => setRoute(e.target.value)}><option value="all">All routes</option>{routes.map((r) => <option key={r}>{r}</option>)}</select>
+        {canEdit ? <button className="btn btn-primary ml-auto" onClick={() => setEdit(blank)}><Plus size={14} /> Add customer</button> : <span className="ml-auto text-xs text-ink3">View only. Back office maintains customers.</span>}
       </div>
       <div className="panel min-h-0 flex-1 overflow-auto">
         <table className="w-full text-[12.5px]">
@@ -41,6 +45,7 @@ export default function Customers() {
                   <td className="pr-6">{c.type === "credit" ? <Meter pct={creditUsedPct(c)} /> : null}</td>
                   <td className="num text-right font-semibold">{fmt(c.balance)}</td>
                   <td className="space-x-1 pr-4 text-right">
+                    <button className="btn h-7" onClick={() => setStmt(c)}><FileText size={13} /> Statement</button>
                     {canEdit && <>
                       <button className="btn h-7 px-2" onClick={() => setEdit(c)}><Pencil size={13} /></button>
                       <button className="btn btn-danger h-7 px-2" onClick={() => { del(c.id); toast(`${c.name} deleted`); }}><Trash2 size={13} /></button>
@@ -52,6 +57,7 @@ export default function Customers() {
           </tbody>
         </table>
       </div>
+      {stmt && <Statement c={customers.find((x) => x.id === stmt.id) ?? stmt} onClose={() => setStmt(null)} />}
       {edit && (
         <MasterForm<Customer> title={customers.some((c) => c.id === edit.id) ? "Edit customer" : "Add customer"} initial={edit} onClose={() => setEdit(null)}
           fields={[

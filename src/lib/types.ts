@@ -6,6 +6,15 @@ export interface User {
   initials: string;
   role: Role;
   title: string;
+  target?: number; // monthly sales target (bookers)
+  baseline?: number; // sales already achieved this month before the demo started
+}
+
+export interface Batch {
+  id: string;
+  no: string;
+  expiry: string; // YYYY-MM
+  qty: number; // pcs
 }
 
 export interface Product {
@@ -13,14 +22,19 @@ export interface Product {
   code: string;
   name: string;
   brand: string;
+  supplier: string;
   packSize: number; // pcs per carton
-  cartonPrice: number;
+  cartonPrice: number; // sale price
+  costPrice: number; // purchase cost per carton
   taxPct: number;
-  stock: number; // pcs physically in warehouse (incl. reserved)
+  stock: number; // good pcs (sum of batches)
+  batches: Batch[];
+  damaged: number; // pcs in quarantine / damaged
   reserved: number; // pcs reserved against approved orders
   reorder: number; // pcs
-  expiry?: string;
-  hue: number; // thumbnail colour
+  leadDays: number; // supplier lead time
+  bin: string; // rack location
+  hue: number;
 }
 
 export interface Customer {
@@ -33,7 +47,7 @@ export interface Customer {
   creditLimit: number;
   creditDays: number;
   balance: number;
-  oldestDue: number; // days since oldest unpaid invoice
+  oldestDue: number; // age in days of the oldest opening balance
   phone: string;
 }
 
@@ -45,7 +59,10 @@ export interface Line {
   qty: number;
   rate: number; // per selected unit
   discPct: number;
-  pickedQty?: number; // set by warehouse (in same unit)
+  scheme?: string; // label of auto-applied scheme
+  pickedQty?: number;
+  orderedQty?: number;
+  shortReason?: string;
 }
 
 export type OrderStatus =
@@ -61,7 +78,14 @@ export type OrderStatus =
 export interface Stamp {
   status: OrderStatus;
   at: number;
-  by: string; // initials
+  by: string;
+}
+
+export interface Allocation {
+  i: number; // line index
+  batch: string;
+  expiry: string;
+  pcs: number;
 }
 
 export interface Order {
@@ -75,18 +99,39 @@ export interface Order {
   trail: Stamp[];
   challanNo?: string;
   invoiceNo?: string;
-  deliveryBoyId?: string;
+  invoicedAt?: number;
+  tripId?: string;
+  allocation?: Allocation[];
+  needsOwner?: string[]; // reasons the owner must approve
   paid: number;
   note?: string;
-  returned?: number; // credit note value
-  signature?: string; // data URL captured by KE
-  filed?: boolean; // invoice filed by KE on credit
+  returned?: number;
+  signature?: string;
+  filed?: boolean;
+}
+
+export interface Trip {
+  id: string;
+  folio: string;
+  vehicle: string;
+  driverId: string;
+  keId: string;
+  orderIds: string[];
+  status: "loading" | "out" | "closed";
+  createdAt: number;
+  dispatchedAt?: number;
+  closedAt?: number;
+  expectedCash?: number;
+  countedCash?: number;
 }
 
 export interface PurchaseLine {
   productId: string;
   ordered: number; // cartons
-  received?: number; // cartons
+  received?: number; // cartons counted
+  damaged?: number; // cartons damaged on arrival
+  batch?: string;
+  expiry?: string;
 }
 export interface PurchaseOrder {
   id: string;
@@ -101,11 +146,14 @@ export interface Payment {
   id: string;
   customerId: string;
   orderId?: string;
+  tripId?: string;
   amount: number;
+  mode: "cash" | "cheque" | "online";
   at: number;
   by: string;
 }
 
+export type ReturnReason = "damaged" | "expired" | "wrong item" | "old packaging" | "refused";
 export interface ReturnNote {
   id: string;
   folio: string;
@@ -113,9 +161,54 @@ export interface ReturnNote {
   customerId: string;
   productId: string;
   qtyPcs: number;
-  condition: "good" | "damaged";
+  reason: ReturnReason;
+  status: "pending" | "inspected";
+  condition?: "good" | "damaged";
+  value?: number;
+  by: string;
+  at: number;
+}
+
+export interface SupplierReturn {
+  id: string;
+  folio: string;
+  supplier: string;
+  productId: string;
+  qtyPcs: number;
+  reason: string;
   value: number;
   at: number;
+}
+
+export interface StockAdj {
+  id: string;
+  productId: string;
+  deltaPcs: number;
+  counted: number;
+  reason: string;
+  value: number;
+  status: "applied" | "pending" | "rejected";
+  by: string;
+  at: number;
+}
+
+export interface Approval {
+  id: string;
+  kind: "order" | "adjustment";
+  refId: string;
+  text: string;
+  detail: string;
+  amount: number;
+  by: string;
+  at: number;
+  status: "pending" | "approved" | "rejected";
+}
+
+export interface Scheme {
+  id: string;
+  productId: string;
+  minCtn: number;
+  discPct: number;
 }
 
 export interface Activity {

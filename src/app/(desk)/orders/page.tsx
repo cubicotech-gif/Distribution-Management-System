@@ -9,7 +9,7 @@ import { Avatar, Empty, Kbd, Spark, StatusChip, toast } from "@/components/ui";
 import OrderDetail from "@/components/OrderDetail";
 import NewOrder from "@/components/NewOrder";
 
-type Tab = "all" | "approval" | "invoice" | "delivery" | "overdue";
+type Tab = "all" | "approval" | "owner" | "invoice" | "delivery" | "overdue";
 
 function Orders() {
   const params = useSearchParams();
@@ -19,9 +19,10 @@ function Orders() {
   const products = useStore((s) => s.products);
   const users = useStore((s) => s.users);
   const approve = useStore((s) => s.approveOrder);
+  const approvals = useStore((s) => s.approvals);
+  const approveRequest = useStore((s) => s.approveRequest);
   const invoice = useStore((s) => s.invoiceOrder);
-  const collect = useStore((s) => s.collect);
-  const user = useUser();
+    const user = useUser();
   const by = user?.initials ?? "—";
 
   const [tab, setTab] = useState<Tab>("all");
@@ -44,7 +45,8 @@ function Orders() {
   const list = useMemo(() => {
     const ql = q.toLowerCase();
     return enriched.filter(({ o, c, chk }) => {
-      if (tab === "approval" && !(o.status === "booked" || o.status === "hold")) return false;
+      if (tab === "approval" && !(o.status === "booked" || (o.status === "hold" && !o.needsOwner))) return false;
+      if (tab === "owner" && !(o.status === "hold" && o.needsOwner)) return false;
       if (tab === "invoice" && o.status !== "picked") return false;
       if (tab === "delivery" && o.status !== "invoiced") return false;
       if (tab === "overdue" && !(c.type === "credit" && c.oldestDue > c.creditDays)) return false;
@@ -56,17 +58,22 @@ function Orders() {
 
   const cur = list.find((e) => e.o.id === sel) ?? list[0];
 
+  const isOwner = user?.role === "admin";
   const primary = (() => {
     if (!cur) return undefined;
     const { o } = cur;
+    if (isOwner) {
+      const req = approvals.find((a) => a.kind === "order" && a.refId === o.id && a.status === "pending");
+      return req ? { label: "Approve as owner", run: () => { approveRequest(req.id, by); toast(`${o.folio} approved by owner`); } } : undefined;
+    }
+    if (o.status === "hold" && o.needsOwner) return undefined;
     if (o.status === "booked" || o.status === "hold")
-      return { label: "Approve order", run: () => { approve(o.id, by); toast(`${o.folio} approved. Stock reserved, sent to warehouse`); } };
+      return { label: "Approve order", run: () => {
+        const r = approve(o.id, by);
+        toast(r.ok ? `${o.folio} approved. Stock reserved, sent to warehouse` : `Needs owner approval: ${r.reasons?.[0]}`);
+      } };
     if (o.status === "picked")
       return { label: "Create invoice", run: () => { invoice(o.id, by); toast(`Invoice issued for ${o.folio}`); } };
-    if (o.status === "delivered") {
-      const due = Math.round(orderTotal(o) - o.paid);
-      if (due > 0) return { label: `Record payment Rs. ${fmt(due)}`, run: () => { collect(o.customerId, due, by, o.id); toast("Payment recorded"); } };
-    }
     return undefined;
   })();
 
@@ -77,14 +84,14 @@ function Orders() {
       const i = list.findIndex((x) => x.o.id === cur?.o.id);
       if (e.key === "j" || e.key === "ArrowDown") { e.preventDefault(); const n = list[Math.min(list.length - 1, i + 1)]; if (n) setSel(n.o.id); }
       else if (e.key === "k" || e.key === "ArrowUp") { e.preventDefault(); const n = list[Math.max(0, i - 1)]; if (n) setSel(n.o.id); }
-      else if (e.key === "n") { e.preventDefault(); setCreating(true); }
+      else if (e.key === "n" && !isOwner) { e.preventDefault(); setCreating(true); }
       else if (e.key === "/") { e.preventDefault(); search.current?.focus(); }
       else if (e.key === "Enter" && primary) { e.preventDefault(); primary.run(); }
-      else if (e.key === "h" && cur?.o.status === "booked") { useStore.getState().holdOrder(cur.o.id, by); toast("Order put on hold"); }
+      else if (e.key === "h" && !isOwner && cur?.o.status === "booked") { useStore.getState().holdOrder(cur.o.id, by); toast("Order put on hold"); }
     };
     window.addEventListener("keydown", fn);
     return () => window.removeEventListener("keydown", fn);
-  }, [list, cur, primary, creating, by]);
+  }, [list, cur, primary, creating, by, isOwner]);
 
   useEffect(() => {
     cur && document.getElementById(`row-${cur.o.id}`)?.scrollIntoView({ block: "nearest" });
@@ -92,7 +99,8 @@ function Orders() {
 
   const tabs: { k: Tab; l: string; n?: number }[] = [
     { k: "all", l: "All" },
-    { k: "approval", l: "Needs approval", n: enriched.filter((e) => e.o.status === "booked" || e.o.status === "hold").length },
+    { k: "approval", l: "Needs approval", n: enriched.filter((e) => e.o.status === "booked" || (e.o.status === "hold" && !e.o.needsOwner)).length },
+    { k: "owner", l: "Waiting for owner", n: enriched.filter((e) => e.o.status === "hold" && e.o.needsOwner).length },
     { k: "invoice", l: "Ready to invoice", n: counts.ready },
     { k: "delivery", l: "Out for delivery" },
     { k: "overdue", l: "Overdue customers" },
@@ -122,7 +130,7 @@ function Orders() {
               <input ref={search} className="field" style={{ paddingLeft: 32 }} placeholder="Filter orders…  ( / )" value={q} onChange={(e) => setQ(e.target.value)}
                 onKeyDown={(e) => e.key === "Escape" && (e.target as HTMLElement).blur()} />
             </div>
-            <button className="btn btn-primary" onClick={() => setCreating(true)}><Plus size={14} /> New <Kbd>N</Kbd></button>
+            {!isOwner && <button className="btn btn-primary" onClick={() => setCreating(true)}><Plus size={14} /> New <Kbd>N</Kbd></button>}
           </div>
           <div className="min-h-0 flex-1 overflow-auto">
             {list.length === 0 && <Empty title="No orders here" hint="Try another view or clear the filter" />}

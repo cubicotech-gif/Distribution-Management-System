@@ -4,23 +4,37 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ClipboardList, FileText, Truck, Boxes, Users, Wallet, PackageCheck, LayoutGrid, Package, Search,
-  Moon, Sun, LogOut, Command, RotateCcw, Plus, ArrowRight,
+  Moon, Sun, LogOut, Command, RotateCcw, Plus, ArrowRight, ShieldCheck, BarChart3, UserCog, Landmark, Route, Undo2, Gauge,
 } from "lucide-react";
 import { HOME, useStore, useUser } from "@/lib/store";
 import type { Role } from "@/lib/types";
 import { Avatar, Kbd, Toaster, useHydrated, toast } from "./ui";
 
-type Nav = { href: string; label: string; icon: React.ComponentType<{ size?: number }>; roles: Role[]; badge?: "orders" | "pick" | "invoice" | "receive" };
+type Badge = "orders" | "pick" | "invoice" | "receive" | "approvals" | "returns" | "dispatch" | "settle" | "plan";
+type Nav = { href: string; label: string; icon: React.ComponentType<{ size?: number }>; roles: Role[]; badge?: Badge };
 const NAV: Nav[] = [
   { href: "/dashboard", label: "Today", icon: LayoutGrid, roles: ["admin", "sales", "purchasing", "warehouse"] },
+  // Owner
+  { href: "/approvals", label: "Approvals", icon: ShieldCheck, roles: ["admin"], badge: "approvals" },
+  { href: "/reports", label: "Reports", icon: BarChart3, roles: ["admin"] },
+  { href: "/team", label: "Team & targets", icon: UserCog, roles: ["admin"] },
+  // Back office
   { href: "/orders", label: "Orders", icon: ClipboardList, roles: ["admin", "sales"], badge: "orders" },
-  { href: "/pick", label: "Pick & Challan", icon: Truck, roles: ["admin", "warehouse"], badge: "pick" },
-  { href: "/invoices", label: "Invoices", icon: FileText, roles: ["admin", "sales"], badge: "invoice" },
-  { href: "/recovery", label: "Recovery", icon: Wallet, roles: ["admin", "sales"] },
-  { href: "/receiving", label: "Stock In", icon: PackageCheck, roles: ["admin", "warehouse", "purchasing"], badge: "receive" },
-  { href: "/stock", label: "Stock", icon: Boxes, roles: ["admin", "sales", "warehouse", "purchasing"] },
+  { href: "/invoices", label: "Invoices", icon: FileText, roles: ["sales"], badge: "invoice" },
+  { href: "/recovery", label: "Recovery", icon: Wallet, roles: ["sales"] },
+  { href: "/settlements", label: "Trip settlement", icon: Landmark, roles: ["sales"], badge: "settle" },
   { href: "/customers", label: "Customers", icon: Users, roles: ["admin", "sales"] },
-  { href: "/products", label: "Products", icon: Package, roles: ["admin", "purchasing"] },
+  { href: "/products", label: "Products & prices", icon: Package, roles: ["sales"] },
+  // Warehouse
+  { href: "/receiving", label: "Inbound (GRN)", icon: PackageCheck, roles: ["warehouse"], badge: "receive" },
+  { href: "/pick", label: "Pick & challan", icon: Truck, roles: ["warehouse"], badge: "pick" },
+  { href: "/dispatch", label: "Dispatch", icon: Route, roles: ["warehouse"], badge: "dispatch" },
+  { href: "/returns", label: "Returns", icon: Undo2, roles: ["warehouse"], badge: "returns" },
+  // Purchasing
+  { href: "/planner", label: "Reorder planner", icon: Gauge, roles: ["purchasing"], badge: "plan" },
+  { href: "/receiving", label: "Orders & GRN", icon: PackageCheck, roles: ["purchasing"], badge: "receive" },
+  { href: "/supplier-returns", label: "Supplier returns", icon: Undo2, roles: ["purchasing"] },
+  { href: "/stock", label: "Stock", icon: Boxes, roles: ["admin", "sales", "warehouse", "purchasing"] },
 ];
 
 export function useTheme() {
@@ -66,12 +80,21 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener("keydown", fn);
   }, []);
 
+  const returns = useStore((s) => s.returns);
+  const trips = useStore((s) => s.trips);
+  const approvals = useStore((s) => s.approvals);
+  const products = useStore((s) => s.products);
   const badges = useMemo(() => ({
-    orders: orders.filter((o) => o.status === "booked" || o.status === "hold").length,
+    orders: orders.filter((o) => o.status === "booked" || (o.status === "hold" && !o.needsOwner)).length,
     pick: orders.filter((o) => o.status === "approved").length,
     invoice: orders.filter((o) => o.status === "picked").length,
     receive: purchases.filter((p) => p.status !== "approved").length,
-  }), [orders, purchases]);
+    approvals: approvals.filter((a) => a.status === "pending").length,
+    returns: returns.filter((r) => r.status === "pending").length,
+    dispatch: orders.filter((o) => o.status === "invoiced" && !o.tripId).length + trips.filter((t) => t.status === "loading").length,
+    settle: trips.filter((t) => t.status === "out" && t.orderIds.every((id) => orders.find((o) => o.id === id)?.status !== "invoiced")).length,
+    plan: products.filter((p) => p.stock - p.reserved < p.reorder).length,
+  }), [orders, purchases, returns, trips, approvals, products]);
 
   if (!hydrated || !user || ["booker", "delivery", "recovery"].includes(user.role)) {
     return <div className="grid h-screen place-items-center text-ink3">Loading…</div>;
@@ -157,7 +180,7 @@ function Palette({ onClose, role }: { onClose: () => void; role: Role }) {
     const out: { group: string; label: string; sub?: string; go: string }[] = [];
     const ql = q.toLowerCase().trim();
     for (const n of NAV.filter((n) => n.roles.includes(role))) out.push({ group: "Go to", label: n.label, go: n.href });
-    if (role === "admin" || role === "sales") out.unshift({ group: "Create", label: "New sales order", sub: "N", go: "/orders?new=1" });
+    if (role === "sales") out.unshift({ group: "Create", label: "New sales order", sub: "N", go: "/orders?new=1" });
     if (ql) {
       for (const o of orders) {
         const c = customers.find((x) => x.id === o.customerId);

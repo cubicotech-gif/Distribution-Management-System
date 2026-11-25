@@ -2,9 +2,9 @@
 import { Check, Printer } from "lucide-react";
 import { useState } from "react";
 import { useStore, useUser } from "@/lib/store";
-import { ago, available, clock, fmt, lineNet, money, orderTotal, pcsOf, STEPS, STEP_LABEL, totals } from "@/lib/calc";
+import { ago, available, clock, fmt, lineNet, money, orderTotal, pcsOf, STEPS, STEP_LABEL, totals, withScheme } from "@/lib/calc";
 import { checkOrder } from "@/lib/check";
-import type { Order } from "@/lib/types";
+import type { Order, ReturnReason } from "@/lib/types";
 import { AgingBar, Avatar, CreditMeter, Kbd, Modal, StatusChip, Thumb, toast } from "./ui";
 
 export function Stepper({ o }: { o: Order }) {
@@ -96,11 +96,11 @@ export function InvoiceDoc({ o, onClose }: { o: Order; onClose: () => void }) {
 
 export function ReturnModal({ o, onClose }: { o: Order; onClose: () => void }) {
   const products = useStore((s) => s.products);
-  const returnItem = useStore((s) => s.returnItem);
+  const report = useStore((s) => s.reportReturn);
   const user = useUser();
   const [pid, setPid] = useState(o.lines[0]?.productId);
   const [qty, setQty] = useState(1);
-  const [cond, setCond] = useState<"good" | "damaged">("good");
+  const [reason, setReason] = useState<ReturnReason>("old packaging");
   const l = o.lines.find((x) => x.productId === pid);
   const p = products.find((x) => x.id === pid);
   const max = l && p ? pcsOf(l, p) : 1;
@@ -119,17 +119,16 @@ export function ReturnModal({ o, onClose }: { o: Order; onClose: () => void }) {
             <input className="field num" type="number" min={1} max={max} value={qty} onChange={(e) => setQty(Math.min(max, Math.max(1, +e.target.value)))} />
           </div>
           <div>
-            <div className="th mb-1">Condition</div>
-            <select className="field" value={cond} onChange={(e) => setCond(e.target.value as "good" | "damaged")}>
-              <option value="good">Good, old packaging → back to stock</option>
-              <option value="damaged">Damaged → quarantine</option>
+            <div className="th mb-1">Reason</div>
+            <select className="field" value={reason} onChange={(e) => setReason(e.target.value as ReturnReason)}>
+              {["old packaging", "damaged", "expired", "wrong item", "refused"].map((r) => <option key={r}>{r}</option>)}
             </select>
           </div>
         </div>
-        <div className="text-xs text-ink2">A credit note is created and the customer balance is reduced automatically.</div>
+        <div className="text-xs text-ink2">The warehouse inspects the goods when they arrive and decides good or damaged. The credit note is issued automatically after inspection.</div>
         <div className="flex justify-end gap-2">
           <button className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" onClick={() => { returnItem(o.id, pid!, qty, cond, user?.initials ?? "—"); toast("Return recorded and credit note issued"); onClose(); }}>Confirm return</button>
+          <button className="btn btn-primary" onClick={() => { report(o.id, pid!, qty, reason, user?.initials ?? "—"); toast("Return sent to warehouse for inspection"); onClose(); }}>Send to warehouse</button>
         </div>
       </div>
     </Modal>
@@ -140,6 +139,7 @@ export default function OrderDetail({ o, primary }: { o: Order; primary?: { labe
   const customers = useStore((s) => s.customers);
   const products = useStore((s) => s.products);
   const updateLines = useStore((s) => s.updateOrderLines);
+  const schemes = useStore((s) => s.schemes);
   const hold = useStore((s) => s.holdOrder);
   const cancel = useStore((s) => s.cancelOrder);
   const user = useUser();
@@ -149,11 +149,16 @@ export default function OrderDetail({ o, primary }: { o: Order; primary?: { labe
   const booker = useStore((s) => s.users.find((u) => u.id === o.bookerId));
   const chk = checkOrder(o, c, products);
   const t = totals(o.lines);
-  const editable = o.status === "booked" || o.status === "hold";
+  const readOnly = user?.role === "admin";
+  const editable = !readOnly && (o.status === "booked" || (o.status === "hold" && !o.needsOwner));
   const by = user?.initials ?? "—";
 
   const setLine = (i: number, patch: Partial<Order["lines"][number]>) =>
-    updateLines(o.id, o.lines.map((l, k) => (k === i ? { ...l, ...patch } : l)));
+    updateLines(o.id, o.lines.map((l, k) => {
+      if (k !== i) return l;
+      const n = { ...l, ...patch };
+      return "qty" in patch ? { ...withScheme(schemes, n), discPct: patch.discPct ?? withScheme(schemes, n).discPct } : n;
+    }));
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -173,7 +178,7 @@ export default function OrderDetail({ o, primary }: { o: Order; primary?: { labe
           </div>
           <div className="flex gap-2">
             {o.invoiceNo || o.challanNo ? <button className="btn" onClick={() => setInv(true)}><Printer size={14} /> Invoice</button> : null}
-            {(o.status === "delivered" || o.status === "paid") && <button className="btn" onClick={() => setRet(true)}>Return</button>}
+            {!readOnly && (o.status === "delivered" || o.status === "paid") && <button className="btn" onClick={() => setRet(true)}>Customer return</button>}
           </div>
         </div>
         <div className="mt-4"><Stepper o={o} /></div>
@@ -188,6 +193,11 @@ export default function OrderDetail({ o, primary }: { o: Order; primary?: { labe
             <div className="num text-[13px] font-semibold text-ink">{fmt(c.balance)} <span className="text-ink3">/ {c.creditLimit ? fmt(c.creditLimit) : "—"}</span></div>
           </div>
         </div>
+        {o.needsOwner && (
+          <div className="mt-3 rounded-xl border border-[var(--warn-fg)] bg-[var(--warn-bg)] px-3 py-2 text-[12px] text-[var(--warn-fg)]">
+            <span className="font-semibold">Waiting for owner.</span> {o.needsOwner.join(" · ")}
+          </div>
+        )}
         {(chk.over || chk.short.length > 0 || chk.overdue) && editable && (
           <div className="mt-3 flex flex-wrap gap-2">
             {chk.over && <span className="chip chip-warn">Over credit limit by Rs. {fmt(c.balance + chk.total - c.creditLimit)}</span>}
@@ -216,7 +226,7 @@ export default function OrderDetail({ o, primary }: { o: Order; primary?: { labe
                   <td className="num py-1.5 text-ink2">{p.code}</td>
                   <td>
                     <div className="flex items-center gap-2"><Thumb p={p} size={24} />
-                      <div><div className="font-medium">{p.name}</div>{sh && <div className="text-[10.5px] font-semibold text-[var(--bad-fg)]">Short: {Math.ceil(sh.shortPcs / (l.unit === "ctn" ? p.packSize : 1))} {l.unit}</div>}</div>
+                      <div><div className="font-medium">{p.name}</div>{sh && <div className="text-[10.5px] font-semibold text-[var(--bad-fg)]">Short: {Math.ceil(sh.shortPcs / (l.unit === "ctn" ? p.packSize : 1))} {l.unit}</div>}{l.scheme && <div className="text-[10.5px] font-medium text-accent">{l.scheme}</div>}{l.shortReason && <div className="text-[10.5px] font-semibold text-[var(--warn-fg)]">Short picked: {l.shortReason}</div>}</div>
                     </div>
                   </td>
                   <td className="uppercase text-ink2">{l.unit}</td>
@@ -226,7 +236,7 @@ export default function OrderDetail({ o, primary }: { o: Order; primary?: { labe
                   <td className="text-right">{editable ? <span className={`chip ${sh ? "chip-warn" : "chip-ok"} num`}>{avCtn}</span> : <span className="text-ink3">—</span>}</td>
                   <td className="num text-right text-ink2">{fmt(l.rate)}</td>
                   <td className="w-16 text-right">
-                    {editable ? <input className="cell num" type="number" step="0.5" min={0} max={20} value={l.discPct} onChange={(e) => setLine(i, { discPct: Math.max(0, +e.target.value) })} /> : <span className="num">{l.discPct}</span>}
+                    {editable ? <input className="cell num" style={{ color: l.discPct > 5 ? "var(--bad-fg)" : undefined }} type="number" step="0.5" min={0} max={20} value={l.discPct} onChange={(e) => setLine(i, { discPct: Math.max(0, +e.target.value) })} /> : <span className="num">{l.discPct}</span>}
                   </td>
                   <td className="num text-right font-semibold">{fmt(lineNet(l))}</td>
                 </tr>
@@ -242,7 +252,7 @@ export default function OrderDetail({ o, primary }: { o: Order; primary?: { labe
             <button className="btn btn-primary h-9 px-4 text-[13px]" onClick={primary.run}>{primary.label} <Kbd>↵</Kbd></button>
           )}
           {editable && o.status === "booked" && <button className="btn h-9" onClick={() => { hold(o.id, by); toast("Order put on hold"); }}>Hold <Kbd>H</Kbd></button>}
-          {(o.status === "booked" || o.status === "hold" || o.status === "approved") && (
+          {!readOnly && (o.status === "booked" || o.status === "hold" || o.status === "approved") && (
             <button className="btn btn-danger h-9" onClick={() => { cancel(o.id, by); toast("Order cancelled"); }}>Cancel</button>
           )}
         </div>
