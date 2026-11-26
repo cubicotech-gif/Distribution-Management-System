@@ -16,6 +16,8 @@ export interface Batch {
   expiry: string; // YYYY-MM
   qty: number; // pcs
   bin: string; // storage location code, RCV = receiving dock
+  receivedAt?: number; // when this batch first came in (for ageing)
+  clearance?: boolean; // short-expiry stock flagged for a quick sale
 }
 
 export type ProductStatus = "active" | "inactive" | "unlisted";
@@ -325,4 +327,21 @@ export interface StockMove {
   from: string;
   to: string;
   reason: string;
+}
+
+export type EntryKind = "receipt" | "pick" | "return" | "adjustment" | "transfer" | "putaway" | "hold" | "release" | "damaged" | "supplier-return" | "write-off" | "recall";
+export interface StockEntry {
+  id: string;
+  at: number;
+  by: string;
+  productId: string;
+  kind: EntryKind;
+  batch: string;
+  from?: string;
+  to?: string;
+  qty: number; // signed change of good on-hand pieces (0 for moves between bins or statuses)
+  pcs: number; // pieces involved
+  ref: string; // GRN, challan, return, count reference
+  note?: string;
+  orderId?: string;
 }

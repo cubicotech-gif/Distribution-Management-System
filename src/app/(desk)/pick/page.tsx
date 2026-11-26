@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { Printer } from "lucide-react";
 import { useStore, useUser } from "@/lib/store";
-import { ago, fmt, pcsOf } from "@/lib/calc";
+import { ago, fmt, isExpired, pcsOf, sellable } from "@/lib/calc";
 import { Avatar, Empty, Kbd, Spinner, StatusChip, Thumb, toast, useBusy } from "@/components/ui";
 import Challan from "@/components/Challan";
 import type { Order, Product } from "@/lib/types";
@@ -13,6 +13,7 @@ function preview(p: Product, pcs: number) {
   let need = pcs;
   for (const b of [...p.batches].sort((a, b) => a.expiry.localeCompare(b.expiry))) {
     if (need <= 0) break;
+    if (isExpired(b.expiry)) continue;
     const t = Math.min(b.qty, need);
     out.push({ no: b.no, expiry: b.expiry, pcs: t, bin: b.bin }); need -= t;
   }
@@ -96,7 +97,7 @@ export default function Pick() {
                 <thead><tr className="th text-left"><th className="py-2">Rack</th><th>Product</th><th>Take from (bin · batch)</th><th className="text-right">Ordered</th><th className="text-right">On shelf</th><th className="text-right">Picked</th></tr></thead>
                 <tbody>
                   {cur.lines.map((l, i) => ({ l, i, p: products.find((x) => x.id === l.productId)! })).sort((a, b) => a.p.bin.localeCompare(b.p.bin)).map(({ l, i, p }) => {
-                    const shelfPcs = p.stock;
+                    const shelfPcs = sellable(p);
                     const shelf = Math.floor(shelfPcs / (l.unit === "ctn" ? p.packSize : 1));
                     const v = vals[cur.id]?.[i] ?? Math.min(l.qty, shelf);
                     const take = preview(p, pcsOf({ ...l, qty: v }, p));

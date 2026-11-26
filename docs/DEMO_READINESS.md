@@ -88,12 +88,14 @@ Built department by department. Nothing moves to the next department until the c
 - ✅ Pick list and challan show the bin to take from
 
 ### B4. Stock control
-- 🟡 Stock by batch with expiry. ⬜ Stock by bin and by status (available, reserved, quarantine, damaged, expired)
-- ⬜ Stock ledger per product (every movement: GRN, pick, return, adjustment, transfer; who and when) with running balance
-- ⬜ Batch traceability: for a batch, which customers received it (recall readiness)
-- ⬜ Expiry tiers (30 / 60 / 90 days) with suggested action (push sale, discount, return to supplier)
-- ⬜ Stock ageing and slow-mover report
-- ⬜ Quarantine release / reject workflow
+- ✅ Stock by batch with expiry and bin; ✅ by status (available, reserved, quality hold, damaged, expired); by bin is the Locations screen
+- ✅ Movement ledger per product or for everything: receipts, picks, returns, adjustments, moves, holds, supplier returns, write-offs, with running balance, filters, search and CSV export
+- ✅ Batch traceability: choose a batch, see where it came from, where it is, and every customer who received it; ✅ recall: hold the remaining stock and print a customer call list
+- ✅ Expiry tiers (expired / 30 / 60 / 90 days) with suggested action; ✅ run a short-expiry deal (bookers see a tag), return to supplier, or write off
+- ✅ Expired stock is never sellable, never counted as available, and never picked
+- ✅ Ageing by days since received and slow-mover flags (nothing picked for 3 weeks, or over 60 days of cover)
+- ✅ Quarantine release / reject (from W1)
+- ⬜ Write-off approval by the owner above a value limit (write-offs currently need only a confirm)
 
 ### B5. Outbound
 - 🟡 Pick list sorted by rack with batch (FEFO), short-pick reason

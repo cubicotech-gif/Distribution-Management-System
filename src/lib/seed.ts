@@ -1,4 +1,4 @@
-import type { Bin, Customer, Grn, Order, Payment, PriceList, Product, PurchaseOrder, User, Line, OrderStatus, Stamp, ReturnNote, Route, Scheme, Supplier, Trip } from "./types";
+import type { Allocation, Bin, Customer, Grn, Order, Payment, PriceList, Product, PurchaseOrder, User, Line, OrderStatus, Stamp, ReturnNote, Route, Scheme, StockEntry, Supplier, Trip } from "./types";
 
 export const USERS: User[] = [
   { id: "u-admin", name: "Zarie Khan", initials: "ZK", role: "admin", title: "Owner" },
@@ -35,10 +35,10 @@ const RAW_PRODUCTS: Omit<Product, "category" | "barcode">[] = [
   P("p7", "NM-10", "Nestle Milkpak 1L", "Nestle", "Nestle Pakistan", 12, 3300, 0.9, [["NM2611", "2026-12", 18], ["NM2702", "2027-03", 42]], 30, 205, "D-01", 4),
   P("p8", "CL-07", "Colgate Strong Teeth 100g", "Colgate", "Colgate-Palmolive", 48, 7400, 0.85, [["CL2803", "2028-03", 25]], 12, 0, "A-04", 6),
   P("p9", "SH-03", "Sunsilk Shampoo 200ml", "Unilever", "Unilever Pakistan", 24, 6100, 0.84, [["SH2802", "2028-02", 30]], 12, 290, "A-05", 5),
-  P("p10", "RF-08", "Rafhan Corn Oil 3L", "Rafhan", "Rafhan Maize", 6, 7900, 0.88, [["RF2704", "2027-04", 9]], 10, 45, "C-02", 6),
+  P("p10", "RF-08", "Rafhan Corn Oil 3L", "Rafhan", "Rafhan Maize", 6, 7900, 0.88, [["RF2704", "2027-04", 9], ["RF2610", "2026-10", 2]], 10, 45, "C-02", 6),
   P("p11", "ML-12", "Meezan Biscuits Family", "Meezan", "Meezan Foods", 36, 3900, 0.89, [["ML2612", "2026-12", 25], ["ML2703", "2027-03", 45]], 20, 25, "D-02", 4),
   { id: "p13", status: "unlisted", code: "LY-21", name: "Lays Masala 50g", brand: "PepsiCo", supplier: "PepsiCo Pakistan", packSize: 48, cartonPrice: 0, costPrice: 3150, taxPct: 18, stock: 0, batches: [], damaged: 0, quarantine: [], reserved: 0, reorder: 240, leadDays: 5, bin: "", hue: 38 },
-  P("p12", "SG-14", "Shield Dish Wash 500ml", "Shield", "Shield Chemicals", 12, 4800, 0.86, [["SG2708", "2027-08", 22]], 8, 160, "A-06", 7),
+  P("p12", "SG-14", "Shield Dish Wash 500ml", "Shield", "Shield Chemicals", 12, 4800, 0.86, [["SG2708", "2027-08", 22], ["SG2611", "2026-11", 3]], 8, 160, "A-06", 7),
 ];
 
 const CAT: Record<string, string> = {
@@ -93,6 +93,20 @@ export const BINS: Bin[] = buildBins();
     p.batches = rows;
     p.stock = rows.reduce((s, b) => s + b.qty, 0);
   }
+})();
+
+// How long ago each batch arrived (gives the ageing report something real to show).
+(function stampBatches() {
+  PRODUCTS.forEach((p, pi) => {
+    const nos = Array.from(new Set(p.batches.map((b) => b.no)));
+    for (const b of p.batches) {
+      const bi = nos.indexOf(b.no);
+      const slow = p.id === "p10" || p.id === "p12";
+      const days = b.no === "DL2706" ? 0.2 : slow ? 72 + bi * 25 : 6 + ((bi * 37 + pi * 17) % 84);
+      b.receivedAt = Date.now() - days * 86400000;
+      if (b.no === "NM2611" || b.no === "ML2612") b.clearance = false;
+    }
+  });
 })();
 
 const C = (
@@ -211,3 +225,56 @@ export const RETURNS: ReturnNote[] = [
 
 // Sales of the previous 13 days (Rs.), used by the owner's trend chart
 export const HISTORY = [1.42, 1.18, 1.65, 1.31, 0.92, 1.58, 1.74, 1.29, 1.51, 1.12, 1.68, 1.83, 1.47].map((m) => m * 1_000_000);
+
+// Which batches the already-picked seed orders were taken from (so recall tracing has real customers to show).
+(function allocateSeedOrders() {
+  for (const o of ORDERS) {
+    if (!["picked", "invoiced", "delivered", "paid"].includes(o.status)) continue;
+    const alloc: Allocation[] = [];
+    o.lines.forEach((l, i) => {
+      const p = PRODUCTS.find((x) => x.id === l.productId)!;
+      const pcs = l.unit === "ctn" ? l.qty * p.packSize : l.qty;
+      const b = [...p.batches].filter((x) => x.bin !== "RCV").sort((a, c) => a.expiry.localeCompare(c.expiry))[0];
+      if (b) alloc.push({ i, batch: b.no, expiry: b.expiry, pcs, bin: b.bin });
+    });
+    o.allocation = alloc;
+  }
+})();
+
+// A believable stock ledger: each batch was received, picked from over the following weeks, and the seed orders picked from it.
+export const LEDGER: StockEntry[] = (() => {
+  const out: StockEntry[] = [];
+  let n = 0;
+  const picked = new Map<string, number>();
+  for (const o of ORDERS) {
+    if (!o.allocation) continue;
+    const at = o.trail.find((t) => t.status === "picked")?.at ?? o.createdAt;
+    for (const a of o.allocation) {
+      const l = o.lines[a.i];
+      const key = `${l.productId}|${a.batch}`;
+      picked.set(key, (picked.get(key) ?? 0) + a.pcs);
+      out.push({ id: `sl${n++}`, at, by: "IA", productId: l.productId, kind: "pick", batch: a.batch, from: a.bin, qty: -a.pcs, pcs: a.pcs, ref: o.challanNo ?? o.folio, orderId: o.id, note: CUSTOMERS.find((c) => c.id === o.customerId)?.name });
+    }
+  }
+  const now2 = Date.now();
+  PRODUCTS.forEach((p, pi) => {
+    const slow = p.id === "p10" || p.id === "p12";
+    for (const no of Array.from(new Set(p.batches.map((b) => b.no)))) {
+      const rows = p.batches.filter((b) => b.no === no);
+      const rcv = rows[0].receivedAt ?? now2 - 20 * 86400000;
+      const cur = rows.reduce((s, b) => s + b.qty, 0);
+      // earlier picks from this batch (customers of past orders)
+      const span = Math.max(0, now2 - 2 * 86400000 - rcv);
+      for (let k = 0; k < (slow ? 1 : 3) && span > 3 * 86400000; k++) {
+        const pcs = Math.max(1, Math.ceil((cur * (0.05 + 0.04 * k)) / p.packSize)) * p.packSize;
+        const at = slow ? rcv + 3 * 86400000 : rcv + ((k + 1) * span) / 4;
+        const cust = CUSTOMERS[(pi + k * 3) % CUSTOMERS.length];
+        picked.set(`${p.id}|${no}`, (picked.get(`${p.id}|${no}`) ?? 0) + pcs);
+        out.push({ id: `sl${n++}`, at, by: "IA", productId: p.id, kind: "pick", batch: no, from: rows[0].bin, qty: -pcs, pcs, ref: `DC-${1900 + ((pi * 13 + k * 7) % 90)}`, orderId: `h${n}`, note: cust.name });
+      }
+      const qty = cur + (picked.get(`${p.id}|${no}`) ?? 0);
+      out.push({ id: `sl${n++}`, at: rcv, by: "IA", productId: p.id, kind: "receipt", batch: no, to: "RCV", qty, pcs: qty, ref: `GRN-${8000 + pi * 7 + (n % 5)}`, note: p.supplier });
+    }
+  });
+  return out.sort((a, b) => b.at - a.at);
+})();

@@ -1,13 +1,18 @@
 "use client";
 import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import LedgerTab from "@/components/stock/LedgerTab";
+import ExpiryTab from "@/components/stock/ExpiryTab";
+import TraceTab from "@/components/stock/TraceTab";
+import AgeingTab from "@/components/stock/AgeingTab";
+import { statusSplit } from "@/lib/stockctl";
 import { ChevronRight } from "lucide-react";
 import { useStore, useUser } from "@/lib/store";
 import { available, coverDays, fmt, monthsLeft } from "@/lib/calc";
 import { Chips, Modal, Thumb, ViewSwitch, toast, useViewMode } from "@/components/ui";
 import type { Product } from "@/lib/types";
 
-function Stock() {
+function StockTab({ onLedger, onTrace }: { onLedger: (productId: string) => void; onTrace: (productId: string, batch: string) => void }) {
   const params = useSearchParams();
   const products = useStore((s) => s.products);
   const adjustments = useStore((s) => s.adjustments);
@@ -32,6 +37,7 @@ function Stock() {
     .filter((p) => flt === "all" || (flt === "low" ? available(p) < p.reorder : flt === "damaged" ? p.damaged > 0 : p.batches.some((b) => monthsLeft(b.expiry) <= 2)));
   const low = products.filter((p) => available(p) < p.reorder).length;
   const near = products.reduce((s, p) => s + p.batches.filter((b) => monthsLeft(b.expiry) <= 2).length, 0);
+  const tot = (() => { const t = { available: 0, reserved: 0, held: 0, damaged: 0, expired: 0 }; for (const p of products) { const x = statusSplit(p); t.available += x.available / p.packSize; t.reserved += x.reserved / p.packSize; t.held += x.held / p.packSize; t.damaged += x.damaged / p.packSize; t.expired += x.expired / p.packSize; } return t; })();
   const pend = adjustments.filter((a) => a.status === "pending").length;
 
   return (
@@ -43,6 +49,11 @@ function Stock() {
         {pend > 0 && <span className="chip chip-info">{pend} stock count waiting for owner</span>}
         <span className="ml-auto text-xs text-ink2">Cartons · click a row to see batches</span>
         <ViewSwitch mode={view} onChange={setView} />
+      </div>
+      <div className="grid grid-cols-5 gap-3">
+        {([["Available to sell", tot.available, "chip-ok"], ["Reserved for orders", tot.reserved, "chip-info"], ["Quality hold", tot.held, "chip-warn"], ["Damaged", tot.damaged, "chip-bad"], ["Expired (still on shelf)", tot.expired, "chip-bad"]] as const).map(([l, v, c]) => (
+          <div key={l} className="panel flex items-center justify-between px-3.5 py-2.5"><span className="text-xs text-ink2">{l}</span><span className={`chip ${c} num`}>{fmt(v)} ctn</span></div>
+        ))}
       </div>
       <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
         <Chips value={cat} onChange={setCat} items={[{ k: "all", label: "All categories", count: products.length }, ...categories.map((c) => ({ k: c, label: c, count: products.filter((p) => p.category === c).length }))]} />
@@ -89,7 +100,7 @@ function Stock() {
                     <td className="num text-right">{fmt(p.stock / p.packSize)}</td>
                     <td className="num text-right text-ink2">{fmt(p.reserved / p.packSize)}</td>
                     <td className="num text-right"><span className={`chip ${isLow ? "chip-warn" : "chip-ok"}`}>{fmt(av / p.packSize)}</span></td>
-                    <td className="num text-right">{p.damaged ? <span className="chip chip-bad">{Math.round((p.damaged / p.packSize) * 10) / 10}</span> : null}{p.quarantine.length ? <span className="chip chip-warn ml-1" title="Held for quality check">{Math.round(p.quarantine.reduce((a, q) => a + q.qty, 0) / p.packSize * 10) / 10} held</span> : null}{!p.damaged && !p.quarantine.length ? <span className="text-ink3">—</span> : null}</td>
+                    <td className="num text-right">{p.damaged ? <span className="chip chip-bad">{Math.round((p.damaged / p.packSize) * 10) / 10}</span> : null}{p.quarantine.length ? <span className="chip chip-warn ml-1" title="Held for quality check">{Math.round(p.quarantine.reduce((a, q) => a + q.qty, 0) / p.packSize * 10) / 10} held</span> : null}{statusSplit(p).expired > 0 ? <span className="chip chip-bad ml-1">expired</span> : null}{!p.damaged && !p.quarantine.length && statusSplit(p).expired === 0 ? <span className="text-ink3">—</span> : null}</td>
                     <td className="num text-right text-ink2">{d.toFixed(0)}d</td>
                     {showCost && <td className="num text-right text-ink2">{fmt(p.costPrice)}</td>}
                     {showCost && <td className="num text-right">{fmt((p.stock / p.packSize) * p.costPrice)}</td>}
@@ -98,9 +109,10 @@ function Stock() {
                   {open === p.id && (
                     <tr key={p.id + "b"} className="bg-panel2"><td /><td colSpan={9} className="px-2 py-2.5">
                       <div className="flex flex-wrap gap-2">
+                        <div className="flex w-full items-center justify-between"><span className="th">Batches</span><button className="btn h-7" onClick={() => onLedger(p.id)}>Movement ledger</button></div>
                         {[...p.batches].sort((a, b) => a.expiry.localeCompare(b.expiry)).map((b, i) => {
                           const m = monthsLeft(b.expiry);
-                          return <div key={b.id} className="rounded-lg border border-line bg-panel px-3 py-1.5"><div className="num text-[12px] font-semibold">{b.no} <span className="font-normal text-ink3">· {b.bin}</span> {i === 0 && <span className="text-[10px] font-bold text-accent">PICKS FIRST</span>}</div><div className="flex items-center gap-2 text-[11px] text-ink2"><span className="num">{fmt(b.qty / p.packSize)} ctn</span><span className={`chip ${m <= 1 ? "chip-bad" : m <= 2 ? "chip-warn" : "chip-mute"}`}>exp {b.expiry} · {m}mo</span></div></div>;
+                          return <button key={b.id} onClick={() => onTrace(p.id, b.no)} title="Trace this batch" className="rounded-lg border border-line bg-panel px-3 py-1.5 text-left hover:border-accent"><div className="num text-[12px] font-semibold">{b.no} <span className="font-normal text-ink3">· {b.bin}</span> {i === 0 && <span className="text-[10px] font-bold text-accent">PICKS FIRST</span>}</div><div className="flex items-center gap-2 text-[11px] text-ink2"><span className="num">{fmt(b.qty / p.packSize)} ctn</span><span className={`chip ${m <= 1 ? "chip-bad" : m <= 2 ? "chip-warn" : "chip-mute"}`}>exp {b.expiry} · {m}mo</span></div></button>;
                         })}
                       </div>
                     </td></tr>
@@ -136,4 +148,26 @@ function Stock() {
     </div>
   );
 }
-export default function Page() { return <Suspense><Stock /></Suspense>; }
+type Tab = "stock" | "ledger" | "expiry" | "trace" | "ageing";
+function Shell() {
+  const params = useSearchParams();
+  const [tab, setTab] = useState<Tab>((params.get("tab") as Tab) || "stock");
+  const [ledgerFor, setLedgerFor] = useState<string | undefined>();
+  const [trace, setTrace] = useState<{ productId: string; batch: string } | undefined>();
+  const tabs: [Tab, string][] = [["stock", "Stock"], ["ledger", "Movement ledger"], ["expiry", "Expiry"], ["trace", "Trace & recall"], ["ageing", "Ageing"]];
+  return (
+    <div className="flex h-full flex-col gap-3">
+      <div className="flex rounded-xl border border-line bg-panel p-1 self-start">
+        {tabs.map(([k, l]) => <button key={k} onClick={() => setTab(k)} className={`h-7 rounded-lg px-3 text-[12.5px] font-semibold ${tab === k ? "bg-accent text-accentink" : "text-ink2"}`}>{l}</button>)}
+      </div>
+      <div className="min-h-0 flex-1">
+        {tab === "stock" && <StockTab onLedger={(id) => { setLedgerFor(id); setTab("ledger"); }} onTrace={(id, b) => { setTrace({ productId: id, batch: b }); setTab("trace"); }} />}
+        {tab === "ledger" && <LedgerTab key={ledgerFor ?? "all"} initialProduct={ledgerFor} />}
+        {tab === "expiry" && <ExpiryTab onTrace={(id, b) => { setTrace({ productId: id, batch: b }); setTab("trace"); }} />}
+        {tab === "trace" && <TraceTab key={trace ? `${trace.productId}|${trace.batch}` : "none"} start={trace} />}
+        {tab === "ageing" && <AgeingTab />}
+      </div>
+    </div>
+  );
+}
+export default function Page() { return <Suspense><Shell /></Suspense>; }

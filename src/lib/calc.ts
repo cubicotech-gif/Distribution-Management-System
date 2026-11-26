@@ -30,8 +30,17 @@ export function totals(lines: Line[], taxPct = 18) {
 export const orderTotal = (o: Order) => totals(o.lines).total;
 export const orderDue = (o: Order) => Math.max(0, orderTotal(o) - o.paid - (o.returned ?? 0));
 
+export function expiryEnd(expiry: string) {
+  const [y, m] = expiry.split("-").map(Number);
+  return new Date(y, m, 0, 23, 59, 59).getTime();
+}
+export const isExpired = (expiry: string, now = Date.now()) => expiryEnd(expiry) < now;
+/** Pieces that can still be sold: good stock minus anything past its expiry. */
+export function sellable(p: Product) {
+  return p.batches.filter((b) => !isExpired(b.expiry)).reduce((s, b) => s + b.qty, 0);
+}
 export function available(p: Product) {
-  return Math.max(0, p.stock - p.reserved);
+  return Math.max(0, sellable(p) - p.reserved);
 }
 
 export function creditUsedPct(c: Customer) {

@@ -1,13 +1,13 @@
 "use client";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { BINS, CUSTOMERS, GRNS, ORDERS, PAYMENTS, PRICE_LISTS, PRODUCTS, PURCHASES, RETURNS, ROUTES, SCHEMES, SUPPLIERS, TRIPS, USERS } from "./seed";
+import { BINS, CUSTOMERS, GRNS, LEDGER, ORDERS, PAYMENTS, PRICE_LISTS, PRODUCTS, PURCHASES, RETURNS, ROUTES, SCHEMES, SUPPLIERS, TRIPS, USERS } from "./seed";
 import { accepted, good, receivedSoFar } from "./grn";
 import { DOCK, HOLD, binUsed } from "./locations";
-import { applySchemes, orderDue, orderTotal, pcsOf, totals, unpaidOrders } from "./calc";
+import { applySchemes, isExpired, orderDue, orderTotal, pcsOf, totals, unpaidOrders } from "./calc";
 import type {
   Activity, Allocation, Approval, Customer, Line, Order, OrderStatus, Payment, Product, PurchaseOrder,
-  Bin, ChangeEntry, Grn, GrnLine, PriceChange, PriceList, ProductStatus, ReturnNote, ReturnReason, Role, Route, Scheme, StockAdj, StockMove, Supplier, SupplierReturn, Trip, User,
+  Bin, ChangeEntry, EntryKind, Grn, GrnLine, PriceChange, PriceList, ProductStatus, ReturnNote, ReturnReason, Role, Route, Scheme, StockAdj, StockEntry, StockMove, Supplier, SupplierReturn, Trip, User,
 } from "./types";
 
 const uid = () => Math.random().toString(36).slice(2, 9);
@@ -23,6 +23,7 @@ function fefo(p: Product, pcs: number): { batch: string; expiry: string; pcs: nu
   let need = pcs;
   for (const b of [...p.batches].sort((a, b) => a.expiry.localeCompare(b.expiry))) {
     if (need <= 0) break;
+    if (isExpired(b.expiry)) continue; // expired stock is never picked
     const take = Math.min(b.qty, need);
     if (take > 0) { b.qty -= take; need -= take; out.push({ batch: b.no, expiry: b.expiry, pcs: take, bin: b.bin }); }
   }
@@ -32,7 +33,7 @@ function fefo(p: Product, pcs: number): { batch: string; expiry: string; pcs: nu
 }
 function addBatch(p: Product, no: string, expiry: string, pcs: number, bin: string = DOCK) {
   const ex = p.batches.find((b) => b.no === no && b.bin === bin);
-  if (ex) ex.qty += pcs; else p.batches.push({ id: uid(), no, expiry, qty: pcs, bin });
+  if (ex) ex.qty += pcs; else p.batches.push({ id: uid(), no, expiry, qty: pcs, bin, receivedAt: Date.now() });
   p.stock = p.batches.reduce((s, b) => s + b.qty, 0);
 }
 
@@ -69,6 +70,7 @@ const seedState = () => ({
   suppliers: SUPPLIERS.map((x) => ({ ...x })) as Supplier[],
   bins: BINS.map((b) => ({ ...b })) as Bin[],
   moves: [] as StockMove[],
+  ledger: LEDGER.map((e) => ({ ...e })) as StockEntry[],
   changeLog: [] as ChangeEntry[],
   activity: [] as Activity[],
   seq: 43,
@@ -95,6 +97,7 @@ interface State {
   suppliers: Supplier[];
   bins: Bin[];
   moves: StockMove[];
+  ledger: StockEntry[];
   changeLog: ChangeEntry[];
   activity: Activity[];
   seq: number;
@@ -163,6 +166,9 @@ interface State {
   upsertPriceList: (l: PriceList) => void;
   deletePriceList: (id: string) => boolean;
   moveStock: (o: { productId: string; batch: string; from: string; to: string; qtyPcs: number; kind: "putaway" | "transfer"; reason: string; by: string; force?: boolean }) => { ok: boolean; reason?: string };
+  markClearance: (productId: string, batch: string, on: boolean) => void;
+  batchToDamaged: (productId: string, batch: string, reason: string, kind: "supplier-return" | "write-off", by: string) => void;
+  quarantineBatch: (productId: string, batch: string, reason: string, by: string) => void;
   upsertBin: (b: Bin) => void;
   setBinBlocked: (code: string, blocked: boolean, note?: string) => void;
   deleteBin: (code: string) => boolean;
@@ -180,6 +186,9 @@ const log = (s: State, text: string): Activity[] => [{ id: uid(), at: Date.now()
 const aud = (s: State, entity: ChangeEntry["entity"], text: string): ChangeEntry[] => [
   { id: uid(), at: Date.now(), by: s.users.find((u) => u.id === s.userId)?.initials ?? "—", entity, text }, ...s.changeLog,
 ].slice(0, 300);
+type NewEntry = { productId: string; kind: EntryKind; batch: string; from?: string; to?: string; qty: number; pcs: number; ref: string; note?: string; orderId?: string };
+const led = (s: State, by: string, es: NewEntry[]): StockEntry[] => [...es.map((e) => ({ ...e, id: uid(), at: Date.now(), by })), ...s.ledger].slice(0, 3000);
+const c0 = (s: State, id: string) => s.customers.find((c) => c.id === id)?.name ?? "";
 const stamp = (o: Order, status: OrderStatus, by: string) => [...o.trail, { status, at: Date.now(), by }];
 
 export const useStore = create<State>()(
@@ -291,18 +300,21 @@ export const useStore = create<State>()(
         if (!o) return;
         const products = cloneP(s.products);
         const allocation: Allocation[] = [];
+        const picks: NewEntry[] = [];
         const lines: Line[] = [];
         o.lines.forEach((l, i) => {
           const p = products.find((x) => x.id === l.productId)!;
           const pq = Math.max(0, Math.min(picked[i] ?? l.qty, l.qty));
           p.reserved = Math.max(0, p.reserved - pcsOf(l, p));
           const got = fefo(p, pcsOf({ ...l, qty: pq }, p));
-          got.forEach((g) => allocation.push({ i: lines.length, ...g }));
+          got.forEach((g) => { allocation.push({ i: lines.length, ...g }); picks.push({ productId: p.id, kind: "pick", batch: g.batch, from: g.bin, qty: -g.pcs, pcs: g.pcs, ref: "", orderId: id }); });
           if (pq > 0) lines.push(withShort({ ...l, qty: pq, pickedQty: pq, orderedQty: l.qty }, l.qty, reasons[i]));
         });
         const challanNo = `DC-${2000 + Number(o.folio.slice(3)) - 1000}`;
+        const custName = s.customers.find((c) => c.id === o.customerId)?.name;
         set({
           products,
+          ledger: led(s, by, picks.map((e) => ({ ...e, ref: challanNo, note: custName }))),
           orders: s.orders.map((x) => (x.id === id ? { ...x, lines, allocation, challanNo, status: "picked", trail: stamp(x, "picked", by) } : x)),
           activity: log(s, `${challanNo} created for ${o.folio}. Batches allocated by expiry`),
         });
@@ -419,11 +431,15 @@ export const useStore = create<State>()(
         const value = Math.round(perPcs * r.qtyPcs);
         const products = cloneP(s.products);
         const pp = products.find((x) => x.id === r.productId)!;
-        if (condition === "good") addBatch(pp, `RET-${r.folio.slice(3)}`, (pp.batches[0]?.expiry ?? "2027-06"), r.qtyPcs);
+        const retBatch = `RET-${r.folio.slice(3)}`;
+        if (condition === "good") addBatch(pp, retBatch, (pp.batches[0]?.expiry ?? "2027-06"), r.qtyPcs);
         else pp.damaged += r.qtyPcs;
         const c = s.customers.find((x) => x.id === r.customerId);
         set({
           products,
+          ledger: led(s, by, [condition === "good"
+            ? { productId: r.productId, kind: "return", batch: retBatch, to: DOCK, qty: r.qtyPcs, pcs: r.qtyPcs, ref: r.folio, note: `${c0(s, r.customerId)} · ${r.reason}` }
+            : { productId: r.productId, kind: "damaged", batch: retBatch, qty: 0, pcs: r.qtyPcs, ref: r.folio, note: `Customer return, damaged · ${c0(s, r.customerId)}` }]),
           returns: s.returns.map((x) => (x.id === id ? { ...x, status: "inspected", condition, value } : x)),
           customers: s.customers.map((x) => (x.id === r.customerId && x.type === "credit" ? { ...x, balance: Math.max(0, x.balance - value) } : x)),
           orders: s.orders.map((x) => (x.id === r.orderId ? { ...x, returned: (x.returned ?? 0) + value } : x)),
@@ -439,6 +455,7 @@ export const useStore = create<State>()(
         const r: SupplierReturn = { id: uid(), folio: `DN-${600 + s.supplierReturns.length + 1}`, supplier: p.supplier, productId, qtyPcs, reason, value, at: Date.now() };
         set({
           supplierReturns: [r, ...s.supplierReturns],
+          ledger: led(s, by, [{ productId, kind: "supplier-return", batch: "—", from: "Damaged pile", qty: 0, pcs: qtyPcs, ref: r.folio, note: `${p.supplier} · ${reason}` }]),
           products: s.products.map((x) => (x.id === productId ? { ...x, damaged: x.damaged - qtyPcs } : x)),
           activity: log(s, `${r.folio}: ${qtyPcs} pcs of ${p.name} returned to ${p.supplier} by ${by}`),
         });
@@ -508,10 +525,14 @@ export const useStore = create<State>()(
         const g = s.grns.find((x) => x.id === grnId);
         if (!g || g.status !== "counted") return;
         const products = cloneP(s.products);
+        const es: NewEntry[] = [];
         for (const l of g.lines) {
           const p = products.find((x) => x.id === l.productId);
           if (!p) continue;
           const gd = good(l) * p.packSize;
+          if (gd > 0) es.push({ productId: p.id, kind: "receipt", batch: l.batch.trim(), to: DOCK, qty: gd, pcs: gd, ref: g.folio, note: g.supplier });
+          if (l.damaged > 0) es.push({ productId: p.id, kind: "damaged", batch: l.batch.trim() || "—", qty: 0, pcs: l.damaged * p.packSize, ref: g.folio, note: l.reason || "Damaged on arrival" });
+          if (l.held > 0) es.push({ productId: p.id, kind: "hold", batch: l.batch.trim() || "HOLD", to: HOLD, qty: 0, pcs: l.held * p.packSize, ref: g.folio, note: l.reason || "Quality hold" });
           if (gd > 0) addBatch(p, l.batch.trim(), l.expiry, gd);
           p.damaged += l.damaged * p.packSize;
           if (l.held > 0) p.quarantine.push({ id: uid(), no: l.batch.trim() || "HOLD", expiry: l.expiry || "2027-12", qty: l.held * p.packSize, bin: HOLD });
@@ -520,7 +541,7 @@ export const useStore = create<State>()(
         const po = s.purchases.find((x) => x.id === g.poId)!;
         const done = po.lines.every((l) => receivedSoFar(po, grns, l.productId) >= l.ordered);
         set({
-          products, grns,
+          products, grns, ledger: led(s, by, es),
           purchases: s.purchases.map((x) => (x.id === po.id ? { ...x, status: done ? "complete" : "partial" } : x)),
           activity: log(s, `${g.folio} approved by ${by}. Good stock is live for bookers${done ? "" : ` (${po.folio} still has cartons to come)`}`),
         });
@@ -538,7 +559,7 @@ export const useStore = create<State>()(
         if (!p || !q) return;
         p.quarantine = p.quarantine.filter((x) => x.id !== batchId);
         if (action === "release") addBatch(p, q.no, q.expiry, q.qty); else p.damaged += q.qty;
-        set({ products, activity: log(s, `${by} ${action === "release" ? "released" : "rejected"} ${Math.round(q.qty / p.packSize * 10) / 10} ctn of ${p.name} (batch ${q.no}) from quality hold`) });
+        set({ products, ledger: led(s, by, [action === "release" ? { productId, kind: "release", batch: q.no, from: HOLD, to: DOCK, qty: q.qty, pcs: q.qty, ref: "QC", note: "Released from quality hold" } : { productId, kind: "damaged", batch: q.no, from: HOLD, qty: 0, pcs: q.qty, ref: "QC", note: "Rejected from quality hold" }]), activity: log(s, `${by} ${action === "release" ? "released" : "rejected"} ${Math.round(q.qty / p.packSize * 10) / 10} ctn of ${p.name} (batch ${q.no}) from quality hold`) });
       },
 
       cycleCount: (productId, counted, reason, by) => {
@@ -553,6 +574,7 @@ export const useStore = create<State>()(
         const products = auto ? applyDelta(s.products, productId, delta) : s.products;
         set({
           products,
+          ledger: auto ? led(s, by, [{ productId, kind: "adjustment", batch: "—", qty: delta, pcs: Math.abs(delta), ref: "COUNT", note: `${reason} (counted ${counted})` }]) : s.ledger,
           adjustments: [adj, ...s.adjustments],
           approvals: auto ? s.approvals : [{
             id: uid(), kind: "adjustment", refId: adj.id, text: `Stock count: ${p.name}`,
@@ -576,7 +598,7 @@ export const useStore = create<State>()(
           });
         } else {
           const adj = s.adjustments.find((x) => x.id === a.refId);
-          if (adj) set({ products: applyDelta(get().products, adj.productId, adj.deltaPcs), adjustments: get().adjustments.map((x) => (x.id === adj.id ? { ...x, status: "applied" } : x)) });
+          if (adj) set({ products: applyDelta(get().products, adj.productId, adj.deltaPcs), ledger: led(get(), by, [{ productId: adj.productId, kind: "adjustment", batch: "—", qty: adj.deltaPcs, pcs: Math.abs(adj.deltaPcs), ref: "COUNT", note: `${adj.reason} (owner approved)` }]), adjustments: get().adjustments.map((x) => (x.id === adj.id ? { ...x, status: "applied" } : x)) });
         }
         set((st) => ({ approvals: st.approvals.map((x) => (x.id === id ? { ...x, status: "approved" } : x)), activity: log(st, `Owner approved ${a.text}`) }));
       },
@@ -755,12 +777,52 @@ export const useStore = create<State>()(
         r.qty -= qtyPcs;
         p.batches = p.batches.filter((b) => b.qty > 0);
         addBatch(p, batch, r.expiry, qtyPcs, to);
+        const landed = p.batches.find((b) => b.no === batch && b.bin === to);
+        if (landed) { landed.clearance = r.clearance; landed.receivedAt = landed.receivedAt ?? r.receivedAt; }
         const mv: StockMove = { id: uid(), at: Date.now(), by, kind, productId, batch, qty: qtyPcs, from, to, reason };
         set({
           products, moves: [mv, ...s.moves].slice(0, 400),
+          ledger: led(s, by, [{ productId, kind, batch, from, to, qty: 0, pcs: qtyPcs, ref: kind === "putaway" ? "PUTAWAY" : "MOVE", note: reason }]),
           activity: log(s, `${by} ${kind === "putaway" ? "put away" : "moved"} ${Math.round((qtyPcs / src.packSize) * 10) / 10} ctn of ${src.name} (${batch}) ${from} → ${to}`),
         });
         return { ok: true };
+      },
+      markClearance: (productId, batch, on) =>
+        set((s) => ({ products: s.products.map((p) => (p.id === productId ? { ...p, batches: p.batches.map((b) => (b.no === batch ? { ...b, clearance: on } : b)) } : p)), changeLog: aud(s, "product", `${on ? "Marked" : "Cleared"} short-expiry deal on batch ${batch}`) })),
+      batchToDamaged: (productId, batch, reason, kind, by) => {
+        const s = get();
+        const products = cloneP(s.products);
+        const p = products.find((x) => x.id === productId);
+        if (!p) return;
+        const rows = p.batches.filter((b) => b.no === batch);
+        const pcs = rows.reduce((a, b) => a + b.qty, 0);
+        if (!pcs) return;
+        p.batches = p.batches.filter((b) => b.no !== batch);
+        p.stock = p.batches.reduce((a, b) => a + b.qty, 0);
+        p.damaged += pcs;
+        set({
+          products,
+          ledger: led(s, by, [{ productId, kind: kind === "write-off" ? "write-off" : "supplier-return", batch, from: rows.map((r) => r.bin).join(", "), qty: -pcs, pcs, ref: kind === "write-off" ? "WRITE-OFF" : "EXPIRY", note: reason }]),
+          activity: log(s, `${by} moved batch ${batch} of ${p.name} (${Math.round(pcs / p.packSize)} ctn) to the damaged pile: ${reason}`),
+        });
+      },
+      quarantineBatch: (productId, batch, reason, by) => {
+        const s = get();
+        const products = cloneP(s.products);
+        const p = products.find((x) => x.id === productId);
+        if (!p) return;
+        const rows = p.batches.filter((b) => b.no === batch);
+        const pcs = rows.reduce((a, b) => a + b.qty, 0);
+        if (!pcs) return;
+        const expiry = rows[0].expiry;
+        p.batches = p.batches.filter((b) => b.no !== batch);
+        p.stock = p.batches.reduce((a, b) => a + b.qty, 0);
+        p.quarantine.push({ id: uid(), no: batch, expiry, qty: pcs, bin: HOLD });
+        set({
+          products,
+          ledger: led(s, by, [{ productId, kind: "recall", batch, from: rows.map((r) => r.bin).join(", "), to: HOLD, qty: -pcs, pcs, ref: "RECALL", note: reason }]),
+          activity: log(s, `${by} put batch ${batch} of ${p.name} (${Math.round(pcs / p.packSize)} ctn) on quality hold: ${reason}`),
+        });
       },
       upsertBin: (b) =>
         set((s) => {
@@ -800,8 +862,8 @@ export const useStore = create<State>()(
       setBookerTarget: (id, target) => set((s) => ({ users: s.users.map((u) => (u.id === id ? { ...u, target } : u)) })),
     }),
     {
-      name: "zarie-dms-v7",
-      version: 7,
+      name: "zarie-dms-v8",
+      version: 8,
       // The signed-in user belongs to this tab only; the business data is shared by every tab.
       partialize: (s) => Object.fromEntries(Object.entries(s).filter(([k]) => k !== "userId")) as unknown as State,
     }
@@ -842,6 +904,6 @@ export type { Role };
 // Keep open tabs in step: when another tab changes the data, pick it up straight away.
 if (typeof window !== "undefined") {
   window.addEventListener("storage", (e) => {
-    if (e.key === "zarie-dms-v7") useStore.persist.rehydrate();
+    if (e.key === "zarie-dms-v8") useStore.persist.rehydrate();
   });
 }

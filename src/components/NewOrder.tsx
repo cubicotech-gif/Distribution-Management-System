@@ -110,7 +110,7 @@ export default function NewOrder({ onClose, onCreated, defaultCustomer }: { onCl
               {matches.map((p, i) => (
                 <button key={p.id} className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-accentsoft ${i === 0 ? "bg-accentwash" : ""}`} onClick={() => add(p)}>
                   <Thumb p={p} size={22} /><span className="flex-1 font-medium">{p.name}</span>
-                  <span className="num text-xs text-ink3">{p.code}</span>
+                  {p.batches.some((b) => b.clearance) && <span className="chip chip-info !py-0 text-[10px]">Short-expiry deal</span>}<span className="num text-xs text-ink3">{p.code}</span>
                   <span className="chip chip-ok num">{Math.floor(available(p) / p.packSize)} ctn</span>
                 </button>
               ))}

@@ -127,7 +127,7 @@ function CatalogGrid({ products, onPick, mode, cat }: { products: Product[]; onP
           return (
             <button key={p.id} disabled={!!onPick && a === 0} onClick={() => onPick?.(p)} className="panel flex flex-col gap-2 p-3 text-left active:scale-[0.98] disabled:opacity-60">
               <div className="flex items-start justify-between"><Thumb p={p} size={44} /><span className={`chip num ${a === 0 ? "chip-bad" : a < p.reorder / p.packSize ? "chip-warn" : "chip-ok"}`}>{a === 0 ? "Out" : a}</span></div>
-              <div className="text-[13px] font-semibold leading-snug">{p.name}</div>
+              <div className="text-[13px] font-semibold leading-snug">{p.name}</div>{p.batches.some((b) => b.clearance) && <span className="chip chip-info self-start !py-0 text-[10px]">Short-expiry deal</span>}
               <div className="num mt-auto text-[15px] font-bold">{fmt(p.cartonPrice)}<span className="ml-1 text-[10px] font-medium text-ink3">/ctn</span></div>
             </button>
           );
@@ -218,7 +218,7 @@ function NewOrderM({ customerId, onBack, onDone }: { customerId: string; onBack:
             <div key={i} className="panel p-3">
               <div className="flex items-center gap-3">
                 <Thumb p={p} size={40} />
-                <div className="min-w-0 flex-1"><div className="truncate text-[14px] font-semibold">{p.name}</div><div className="num text-xs text-ink3">Rs. {fmt(l.rate)} / {l.unit}</div>{priced[i].scheme && <div className="text-[11px] font-semibold text-accent">{priced[i].scheme}</div>}</div>
+                <div className="min-w-0 flex-1"><div className="truncate text-[14px] font-semibold">{p.name}</div><div className="num text-xs text-ink3">Rs. {fmt(l.rate)} / {l.unit}</div>{p.batches.some((b) => b.clearance) && <div className="text-[11px] font-semibold text-[var(--info-fg)]">Short-expiry deal: sell this first</div>}{priced[i].scheme && <div className="text-[11px] font-semibold text-accent">{priced[i].scheme}</div>}</div>
                 <div className="num text-[14px] font-bold">{fmt(lineNet(priced[i]))}</div>
               </div>
               <div className="mt-2.5 flex items-center gap-2">

@@ -44,7 +44,7 @@ export default function Warehouse() {
         <Tile label="Damaged / on hold" value={`${Math.round(damaged.reduce((s, p) => s + p.damaged / p.packSize, 0) * 10) / 10} / ${Math.round(held * 10) / 10}`} sub="Cartons: damaged · quality hold" href="/receiving" />
       </div>
       <div className="grid grid-cols-3 gap-3">
-        <Card title="Sell these first (expiring)">
+        <Card title="Sell these first (expiring)" action={<Link href="/stock?tab=expiry" className="text-xs font-semibold text-accent">Expiry actions</Link>}>
           {near.length === 0 && <div className="py-3 text-ink3">No near-expiry stock.</div>}
           {near.map(({ p, b }) => <Row key={b.id}><div><div className="font-medium">{p.name}</div><div className="num text-[11px] text-ink3">Batch {b.no} · rack {p.bin}</div></div><span className="chip chip-warn num">{b.expiry} · {Math.floor(b.qty / p.packSize)} ctn</span></Row>)}
           <div className="mt-2 text-[11px] text-ink3">Picking always takes the earliest expiry first (FEFO).</div>
