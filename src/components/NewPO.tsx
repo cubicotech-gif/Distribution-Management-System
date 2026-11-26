@@ -9,6 +9,11 @@ export default function NewPO({ onClose, preset }: { onClose: () => void; preset
   const createPO = useStore((s) => s.createPO);
   const [supplier, setSupplier] = useState(() => products.find((p) => preset && preset[p.id])?.supplier ?? "Unilever Pakistan");
   const [qty, setQty] = useState<Record<string, number>>(() => preset ?? {});
+  const suppliersAll = useStore((s) => s.suppliers);
+  const iso = (d: number) => new Date(d).toISOString().slice(0, 10);
+  const lead = suppliersAll.find((x) => x.name === supplier)?.leadDays ?? 5;
+  const [exp, setExp] = useState<string | null>(null);
+  const expected = exp ?? iso(Date.now() + lead * 86400000);
   const [items, setItems] = useState<NewItem[]>([]);
   const [ni, setNi] = useState<NewItem>({ name: "", brand: "", packSize: 12, costPrice: 0, ordered: 10 });
   const lines = Object.entries(qty).filter(([, n]) => n > 0).map(([productId, ordered]) => ({ productId, ordered }));
@@ -16,7 +21,11 @@ export default function NewPO({ onClose, preset }: { onClose: () => void; preset
   return (
     <Modal open onClose={onClose} title="New factory purchase order" width={560}>
       <div className="space-y-3">
-        <select className="field" value={supplier} onChange={(e) => { setSupplier(e.target.value); setQty({}); }}>{suppliers.map((s) => <option key={s}>{s}</option>)}</select>
+        <div className="grid grid-cols-[1fr_170px] gap-3">
+          <select className="field" value={supplier} onChange={(e) => { setSupplier(e.target.value); setQty({}); setExp(null); }}>{suppliers.map((s) => <option key={s}>{s}</option>)}</select>
+          <label className="block"><input className={`field ${expected < iso(Date.now()) ? "field-err" : ""}`} type="date" value={expected} onChange={(e) => setExp(e.target.value)} title="Expected delivery date" />{expected < iso(Date.now()) && <div className="mt-1 text-[11px] font-semibold text-[var(--bad-fg)]">Date is in the past</div>}</label>
+        </div>
+        <div className="text-[11px] text-ink3">Expected delivery date. Defaults to today plus the supplier&apos;s lead time ({lead} days).</div>
         <div className="rounded-xl border border-line">
           {products.filter((p) => p.supplier === supplier).map((p) => (
             <div key={p.id} className="flex items-center gap-3 border-b border-line px-3 py-1.5 last:border-0">
@@ -37,7 +46,7 @@ export default function NewPO({ onClose, preset }: { onClose: () => void; preset
           </div>
           {items.map((it, i) => <div key={i} className="mt-2 flex items-center justify-between text-xs"><span>{it.name} · {it.packSize}/ctn · {it.ordered} ctn</span><span className="chip chip-warn">Back office will list and price it</span></div>)}
         </div>
-        <div className="flex justify-end gap-2"><button className="btn" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={!lines.length && !items.length} onClick={() => { createPO(supplier, lines, items); onClose(); toast(items.length ? "PO sent. New items are waiting for back office to list" : "Purchase order sent to factory"); }}>Send to factory</button></div>
+        <div className="flex justify-end gap-2"><button className="btn" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={(!lines.length && !items.length) || expected < iso(Date.now())} onClick={() => { createPO(supplier, lines, items, Date.parse(expected + "T12:00:00")); onClose(); toast(items.length ? "PO sent. New items are waiting for back office to list" : "Purchase order sent to factory"); }}>Send to factory</button></div>
       </div>
     </Modal>
   );

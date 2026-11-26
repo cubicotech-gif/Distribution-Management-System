@@ -53,7 +53,7 @@ function Products() {
   const pendingFor = (id: string) => history.find((h) => h.productId === id && h.status === "pending");
   const used = (p: Product) => p.stock > 0 || p.damaged > 0 || orders.some((o) => o.lines.some((l) => l.productId === p.id)) || purchases.some((o) => o.lines.some((l) => l.productId === p.id));
   const margin = (p: Product) => (p.cartonPrice ? ((p.cartonPrice - p.costPrice) / p.cartonPrice) * 100 : 0);
-  const blank: Product = { id: `p${Date.now()}`, status: "active", code: "", name: "", brand: "", supplier: suppliers[0]?.name ?? "", category: categories[0] ?? "General", barcode: "", packSize: 12, cartonPrice: 0, costPrice: 0, taxPct: 18, stock: 0, batches: [], damaged: 0, reserved: 0, reorder: 120, leadDays: 5, bin: "", hue: Math.floor(Math.random() * 360) };
+  const blank: Product = { id: `p${Date.now()}`, status: "active", code: "", name: "", brand: "", supplier: suppliers[0]?.name ?? "", category: categories[0] ?? "General", barcode: "", packSize: 12, cartonPrice: 0, costPrice: 0, taxPct: 18, stock: 0, batches: [], damaged: 0, quarantine: [], reserved: 0, reorder: 120, leadDays: 5, bin: "", hue: Math.floor(Math.random() * 360) };
 
   const rows = listed
     .filter((p) => (p.name + p.code + p.brand + p.barcode + p.category).toLowerCase().includes(q.toLowerCase()))

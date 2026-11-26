@@ -113,6 +113,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const returns = useStore((s) => s.returns);
   const trips = useStore((s) => s.trips);
   const approvals = useStore((s) => s.approvals);
+  const grnsAll = useStore((s) => s.grns);
   const products = useStore((s) => s.products);
   useEffect(() => {
     const label = NAV.find((n) => path.startsWith(n.href))?.label;
@@ -123,13 +124,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     orders: orders.filter((o) => o.status === "booked" || (o.status === "hold" && !o.needsOwner)).length,
     pick: orders.filter((o) => o.status === "approved").length,
     invoice: orders.filter((o) => o.status === "picked").length,
-    receive: purchases.filter((p) => p.status !== "approved").length,
+    receive: user?.role === "purchasing"
+      ? grnsAll.filter((g) => g.status === "counted").length + purchases.filter((p) => (p.status === "ordered" || p.status === "partial") && p.expectedAt < Date.now() - 12 * 3600000).length
+      : purchases.filter((p) => (p.status === "ordered" || p.status === "partial") && p.expectedAt < new Date().setHours(23, 59, 59, 999)).length + grnsAll.filter((g) => g.status === "counting").length,
     approvals: approvals.filter((a) => a.status === "pending").length,
     returns: returns.filter((r) => r.status === "pending").length,
     dispatch: orders.filter((o) => o.status === "invoiced" && !o.tripId).length + trips.filter((t) => t.status === "loading").length,
     settle: trips.filter((t) => t.status === "out" && t.orderIds.every((id) => orders.find((o) => o.id === id)?.status !== "invoiced")).length,
     plan: products.filter((p) => p.stock - p.reserved < p.reorder).length,
-  }), [orders, purchases, returns, trips, approvals, products]);
+  }), [orders, purchases, returns, trips, approvals, products, grnsAll, user?.role]);
 
   if (!hydrated || !user || ["booker", "delivery", "recovery"].includes(user.role)) {
     return <div className="grid h-screen place-items-center text-ink3">Loading…</div>;

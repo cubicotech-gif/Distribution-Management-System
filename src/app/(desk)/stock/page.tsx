@@ -89,7 +89,7 @@ function Stock() {
                     <td className="num text-right">{fmt(p.stock / p.packSize)}</td>
                     <td className="num text-right text-ink2">{fmt(p.reserved / p.packSize)}</td>
                     <td className="num text-right"><span className={`chip ${isLow ? "chip-warn" : "chip-ok"}`}>{fmt(av / p.packSize)}</span></td>
-                    <td className="num text-right">{p.damaged ? <span className="chip chip-bad">{Math.round((p.damaged / p.packSize) * 10) / 10}</span> : <span className="text-ink3">—</span>}</td>
+                    <td className="num text-right">{p.damaged ? <span className="chip chip-bad">{Math.round((p.damaged / p.packSize) * 10) / 10}</span> : null}{p.quarantine.length ? <span className="chip chip-warn ml-1" title="Held for quality check">{Math.round(p.quarantine.reduce((a, q) => a + q.qty, 0) / p.packSize * 10) / 10} held</span> : null}{!p.damaged && !p.quarantine.length ? <span className="text-ink3">—</span> : null}</td>
                     <td className="num text-right text-ink2">{d.toFixed(0)}d</td>
                     {showCost && <td className="num text-right text-ink2">{fmt(p.costPrice)}</td>}
                     {showCost && <td className="num text-right">{fmt((p.stock / p.packSize) * p.costPrice)}</td>}

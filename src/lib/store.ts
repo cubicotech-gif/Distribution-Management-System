@@ -1,11 +1,12 @@
 "use client";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { CUSTOMERS, ORDERS, PAYMENTS, PRICE_LISTS, PRODUCTS, PURCHASES, RETURNS, ROUTES, SCHEMES, SUPPLIERS, TRIPS, USERS } from "./seed";
+import { CUSTOMERS, GRNS, ORDERS, PAYMENTS, PRICE_LISTS, PRODUCTS, PURCHASES, RETURNS, ROUTES, SCHEMES, SUPPLIERS, TRIPS, USERS } from "./seed";
+import { accepted, good, receivedSoFar } from "./grn";
 import { applySchemes, orderDue, orderTotal, pcsOf, totals, unpaidOrders } from "./calc";
 import type {
   Activity, Allocation, Approval, Customer, Line, Order, OrderStatus, Payment, Product, PurchaseOrder,
-  ChangeEntry, PriceChange, PriceList, ProductStatus, ReturnNote, ReturnReason, Role, Route, Scheme, StockAdj, Supplier, SupplierReturn, Trip, User,
+  ChangeEntry, Grn, GrnLine, PriceChange, PriceList, ProductStatus, ReturnNote, ReturnReason, Role, Route, Scheme, StockAdj, Supplier, SupplierReturn, Trip, User,
 } from "./types";
 
 const uid = () => Math.random().toString(36).slice(2, 9);
@@ -53,6 +54,7 @@ const seedState = () => ({
   customers: CUSTOMERS.map((c) => ({ ...c })),
   orders: ORDERS.map((o) => ({ ...o, lines: o.lines.map((l) => ({ ...l })), trail: [...o.trail] })),
   purchases: PURCHASES.map((p) => ({ ...p, lines: p.lines.map((l) => ({ ...l })) })),
+  grns: GRNS.map((g) => ({ ...g, lines: g.lines.map((l) => ({ ...l })) })) as Grn[],
   payments: [...PAYMENTS] as Payment[],
   returns: RETURNS.map((r) => ({ ...r })) as ReturnNote[],
   trips: TRIPS.map((t) => ({ ...t })) as Trip[],
@@ -76,6 +78,7 @@ interface State {
   customers: Customer[];
   orders: Order[];
   purchases: PurchaseOrder[];
+  grns: Grn[];
   payments: Payment[];
   returns: ReturnNote[];
   trips: Trip[];
@@ -123,9 +126,16 @@ interface State {
   createSupplierReturn: (productId: string, qtyPcs: number, reason: string, by: string) => void;
 
   // stock in
-  createPO: (supplier: string, lines: { productId: string; ordered: number }[], newItems?: NewItem[]) => void;
-  receivePO: (id: string, rows: Record<number, { received: number; damaged: number; batch: string; expiry: string }>, by: string) => void;
-  approvePO: (id: string) => void;
+  createPO: (supplier: string, lines: { productId: string; ordered: number }[], newItems?: NewItem[], expectedAt?: number) => void;
+  registerArrival: (poId: string, info: { deliveryNote: string; vehicle: string; driver: string }, by: string) => string;
+  updateGrnLine: (grnId: string, idx: number, patch: Partial<GrnLine>) => void;
+  fillGrnExpected: (grnId: string) => void;
+  submitGrn: (grnId: string, by: string) => void;
+  sendBackGrn: (grnId: string, note: string) => void;
+  approveGrn: (grnId: string, by: string) => void;
+  closePoShort: (poId: string, note: string) => void;
+  releaseQuarantine: (productId: string, batchId: string, action: "release" | "reject", by: string) => void;
+  scanGrn: (grnId: string, code: string) => { ok: boolean; name?: string };
   cycleCount: (productId: string, counted: number, reason: string, by: string) => void;
 
   // owner
@@ -425,48 +435,101 @@ export const useStore = create<State>()(
         });
       },
 
-      createPO: (supplier, lines, newItems = []) => {
+      createPO: (supplier, lines, newItems = [], expectedAt) => {
         const s = get();
         const created: Product[] = newItems.map((n, i) => ({
           id: `p${uid()}`, status: "unlisted", category: "General", barcode: "", code: `NEW-${s.products.length + i + 1}`, name: n.name, brand: n.brand || supplier.split(" ")[0],
-          supplier, packSize: n.packSize, cartonPrice: 0, costPrice: n.costPrice, taxPct: 18, stock: 0, batches: [], damaged: 0, reserved: 0,
+          supplier, packSize: n.packSize, cartonPrice: 0, costPrice: n.costPrice, taxPct: 18, stock: 0, batches: [], damaged: 0, quarantine: [], reserved: 0,
           reorder: n.packSize * 5, leadDays: 5, bin: "", hue: Math.floor(Math.random() * 360),
         }));
         const all = [...lines, ...created.map((p, i) => ({ productId: p.id, ordered: newItems[i].ordered }))];
+        const lead = s.suppliers.find((x) => x.name === supplier)?.leadDays ?? 5;
         set({
           products: [...created, ...s.products],
-          purchases: [{ id: `po${uid()}`, folio: `PO-${7012 + s.purchases.length - 2}`, supplier, lines: all, status: "ordered", createdAt: Date.now() }, ...s.purchases],
+          purchases: [{ id: `po${uid()}`, folio: `PO-${7013 + s.purchases.length - 3}`, supplier, lines: all, status: "ordered", createdAt: Date.now(), expectedAt: expectedAt ?? Date.now() + lead * 86400000 }, ...s.purchases],
           activity: log(s, `Purchase order sent to ${supplier}${created.length ? ` (${created.length} new item${created.length > 1 ? "s" : ""} to be listed)` : ""}`),
         });
       },
 
-      receivePO: (id, rows, by) =>
-        set((s) => ({
-          purchases: s.purchases.map((po) =>
-            po.id === id
-              ? { ...po, status: "received", lines: po.lines.map((l, i) => ({ ...l, ...(rows[i] ?? { received: l.ordered, damaged: 0, batch: "", expiry: "" }) })) }
-              : po
-          ),
-          activity: log(s, `${by} counted the goods for ${s.purchases.find((p) => p.id === id)?.folio}`),
-        })),
-
-      approvePO: (id) => {
+      registerArrival: (poId, info, by) => {
         const s = get();
-        const po = s.purchases.find((x) => x.id === id);
-        if (!po) return;
+        const po = s.purchases.find((x) => x.id === poId);
+        if (!po) return "";
+        const id = `g${uid()}`;
+        const g: Grn = {
+          id, folio: `GRN-${9001 + s.grns.length}`, poId, supplier: po.supplier, ...info, status: "counting", arrivedAt: Date.now(), by,
+          lines: po.lines.filter((l) => l.ordered - receivedSoFar(po, s.grns, l.productId, true) > 0).map((l) => ({ productId: l.productId, arrived: 0, rejected: 0, damaged: 0, held: 0, batch: "", expiry: "", reason: "" })),
+        };
+        set({ grns: [g, ...s.grns], activity: log(s, `${po.supplier} truck ${info.vehicle || ""} arrived (${g.folio}). Count started by ${by}`) });
+        return id;
+      },
+      updateGrnLine: (grnId, idx, patch) => set((s) => ({ grns: s.grns.map((g) => (g.id === grnId ? { ...g, lines: g.lines.map((l, i) => (i === idx ? { ...l, ...patch } : l)) } : g)) })),
+      fillGrnExpected: (grnId) => {
+        const s = get();
+        const g = s.grns.find((x) => x.id === grnId);
+        const po = g && s.purchases.find((p) => p.id === g.poId);
+        if (!g || !po) return;
+        set({ grns: s.grns.map((x) => (x.id === grnId ? { ...x, lines: x.lines.map((l) => ({ ...l, arrived: Math.max(l.arrived, po.lines.find((p) => p.productId === l.productId)!.ordered - receivedSoFar(po, s.grns.filter((y) => y.id !== grnId), l.productId, true)) })) } : x)) });
+      },
+      scanGrn: (grnId, code) => {
+        const s = get();
+        const g = s.grns.find((x) => x.id === grnId);
+        const c = code.trim().toLowerCase();
+        const p = s.products.find((x) => x.code.toLowerCase() === c || (x.barcode && x.barcode === c));
+        if (!g || !p) return { ok: false };
+        const i = g.lines.findIndex((l) => l.productId === p.id);
+        if (i < 0) return { ok: false, name: p.name };
+        get().updateGrnLine(grnId, i, { arrived: g.lines[i].arrived + 1 });
+        return { ok: true, name: p.name };
+      },
+      submitGrn: (grnId, by) => {
+        const s = get();
+        const g = s.grns.find((x) => x.id === grnId);
+        if (!g) return;
+        set({ grns: s.grns.map((x) => (x.id === grnId ? { ...x, status: "counted", countedAt: Date.now(), by, sentBack: undefined } : x)), activity: log(s, `${g.folio} counted by ${by}. Waiting for purchasing to approve`) });
+      },
+      sendBackGrn: (grnId, note) => {
+        const s = get();
+        const g = s.grns.find((x) => x.id === grnId);
+        if (!g) return;
+        set({ grns: s.grns.map((x) => (x.id === grnId ? { ...x, status: "counting", sentBack: note } : x)), activity: log(s, `${g.folio} sent back to the warehouse for a recount: ${note}`) });
+      },
+      approveGrn: (grnId, by) => {
+        const s = get();
+        const g = s.grns.find((x) => x.id === grnId);
+        if (!g || g.status !== "counted") return;
         const products = cloneP(s.products);
-        po.lines.forEach((l) => {
+        for (const l of g.lines) {
           const p = products.find((x) => x.id === l.productId);
-          if (!p) return;
-          const good = Math.max(0, (l.received ?? 0) - (l.damaged ?? 0)) * p.packSize;
-          if (good > 0) addBatch(p, l.batch || `B${Date.now().toString().slice(-5)}`, l.expiry || "2027-12", good);
-          p.damaged += (l.damaged ?? 0) * p.packSize;
-        });
+          if (!p) continue;
+          const gd = good(l) * p.packSize;
+          if (gd > 0) addBatch(p, l.batch.trim(), l.expiry, gd);
+          p.damaged += l.damaged * p.packSize;
+          if (l.held > 0) p.quarantine.push({ id: uid(), no: l.batch.trim() || "HOLD", expiry: l.expiry || "2027-12", qty: l.held * p.packSize });
+        }
+        const grns = s.grns.map((x) => (x.id === grnId ? { ...x, status: "approved" as const, approvedAt: Date.now() } : x));
+        const po = s.purchases.find((x) => x.id === g.poId)!;
+        const done = po.lines.every((l) => receivedSoFar(po, grns, l.productId) >= l.ordered);
         set({
-          products,
-          purchases: s.purchases.map((x) => (x.id === id ? { ...x, status: "approved" } : x)),
-          activity: log(s, `${po.folio} approved. Stock is live for bookers`),
+          products, grns,
+          purchases: s.purchases.map((x) => (x.id === po.id ? { ...x, status: done ? "complete" : "partial" } : x)),
+          activity: log(s, `${g.folio} approved by ${by}. Good stock is live for bookers${done ? "" : ` (${po.folio} still has cartons to come)`}`),
         });
+      },
+      closePoShort: (poId, note) => {
+        const s = get();
+        const po = s.purchases.find((x) => x.id === poId);
+        set({ purchases: s.purchases.map((x) => (x.id === poId ? { ...x, status: "closed", closedNote: note } : x)), activity: log(s, `${po?.folio} closed short: ${note}`) });
+      },
+      releaseQuarantine: (productId, batchId, action, by) => {
+        const s = get();
+        const products = cloneP(s.products);
+        const p = products.find((x) => x.id === productId);
+        const q = p?.quarantine.find((x) => x.id === batchId);
+        if (!p || !q) return;
+        p.quarantine = p.quarantine.filter((x) => x.id !== batchId);
+        if (action === "release") addBatch(p, q.no, q.expiry, q.qty); else p.damaged += q.qty;
+        set({ products, activity: log(s, `${by} ${action === "release" ? "released" : "rejected"} ${Math.round(q.qty / p.packSize * 10) / 10} ctn of ${p.name} (batch ${q.no}) from quality hold`) });
       },
 
       cycleCount: (productId, counted, reason, by) => {
@@ -594,7 +657,7 @@ export const useStore = create<State>()(
             const id = `p${uid()}`;
             products = [{
               id, status: (r.cartonPrice ?? 0) > 0 ? "active" : "unlisted", category: "General", barcode: "", code: r.code, name: r.name || r.code, brand: r.brand || "", supplier: r.supplier || "",
-              packSize: r.packSize || 12, cartonPrice: 0, costPrice: r.costPrice ?? 0, taxPct: 18, stock: 0, batches: [], damaged: 0, reserved: 0,
+              packSize: r.packSize || 12, cartonPrice: 0, costPrice: r.costPrice ?? 0, taxPct: 18, stock: 0, batches: [], damaged: 0, quarantine: [], reserved: 0,
               reorder: r.reorder ?? 120, leadDays: r.leadDays ?? 5, bin: r.bin ?? "", hue: Math.floor(Math.random() * 360),
             }, ...products];
             if ((r.cartonPrice ?? 0) > 0) priceChanges.push({ productId: id, newPrice: r.cartonPrice! });
@@ -690,8 +753,8 @@ export const useStore = create<State>()(
       setBookerTarget: (id, target) => set((s) => ({ users: s.users.map((u) => (u.id === id ? { ...u, target } : u)) })),
     }),
     {
-      name: "zarie-dms-v5",
-      version: 5,
+      name: "zarie-dms-v6",
+      version: 6,
       // The signed-in user belongs to this tab only; the business data is shared by every tab.
       partialize: (s) => Object.fromEntries(Object.entries(s).filter(([k]) => k !== "userId")) as unknown as State,
     }
@@ -732,6 +795,6 @@ export type { Role };
 // Keep open tabs in step: when another tab changes the data, pick it up straight away.
 if (typeof window !== "undefined") {
   window.addEventListener("storage", (e) => {
-    if (e.key === "zarie-dms-v5") useStore.persist.rehydrate();
+    if (e.key === "zarie-dms-v6") useStore.persist.rehydrate();
   });
 }

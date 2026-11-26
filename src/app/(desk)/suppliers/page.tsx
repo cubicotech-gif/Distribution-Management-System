@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Plus, Pencil, Trash2 } from "lucide-react";
 import { useStore, useUser } from "@/lib/store";
 import type { Supplier } from "@/lib/types";
+import { claimsOf } from "@/lib/grn";
 import MasterForm from "@/components/MasterForm";
 import { ask, toast } from "@/components/ui";
 
@@ -10,6 +11,7 @@ export default function Suppliers() {
   const suppliers = useStore((s) => s.suppliers);
   const products = useStore((s) => s.products);
   const purchases = useStore((s) => s.purchases);
+  const grns = useStore((s) => s.grns);
   const upsert = useStore((s) => s.upsertSupplier);
   const del = useStore((s) => s.deleteSupplier);
   const canEdit = useUser()?.role === "purchasing";
@@ -27,13 +29,13 @@ export default function Suppliers() {
             {suppliers.map((s) => {
               const ps = products.filter((p) => p.supplier === s.name);
               const pos = purchases.filter((p) => p.supplier === s.name);
-              const claims = pos.flatMap((p) => p.lines).filter((l) => (l.received ?? l.ordered) < l.ordered || (l.damaged ?? 0) > 0).length;
+              const claims = claimsOf(grns, purchases, products).filter((c) => c.grn.supplier === s.name).length;
               return (
                 <tr key={s.id} className="row-hover border-t border-line">
                   <td className="px-4 py-2.5 font-semibold">{s.name}</td>
                   <td><div>{s.contact}</div><div className="num text-[11px] text-ink3">{s.phone}</div></td>
                   <td>{s.terms}</td><td className="num text-right">{s.leadDays} days</td><td className="num text-right">{ps.length}</td>
-                  <td className="num text-right">{pos.filter((p) => p.status === "ordered").length || "—"}</td>
+                  <td className="num text-right">{pos.filter((p) => p.status === "ordered" || p.status === "partial").length || "—"}</td>
                   <td className="text-right">{claims ? <span className="chip chip-bad num">{claims}</span> : <span className="text-ink3">—</span>}</td>
                   <td className="space-x-1 pr-4 text-right">{canEdit && <><button className="btn h-7 px-2" onClick={() => setEdit(s)}><Pencil size={13} /></button><button className="btn btn-danger h-7 px-2" onClick={async () => { if (await ask({ title: `Delete ${s.name}?`, confirm: "Delete", danger: true })) toast(del(s.id) ? "Supplier deleted" : "This supplier still has products, so it cannot be deleted."); }}><Trash2 size={13} /></button></>}</td>
                 </tr>

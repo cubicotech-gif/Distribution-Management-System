@@ -8,12 +8,18 @@ export default function Warehouse() {
   const orders = useStore((s) => s.orders);
   const products = useStore((s) => s.products);
   const purchases = useStore((s) => s.purchases);
+  const grns = useStore((s) => s.grns);
   const returns = useStore((s) => s.returns);
   const trips = useStore((s) => s.trips);
 
   const toPick = orders.filter((o) => o.status === "approved");
   const cartons = toPick.reduce((s, o) => s + o.lines.reduce((a, l) => a + pcsOf(l, products.find((p) => p.id === l.productId)!) / products.find((p) => p.id === l.productId)!.packSize, 0), 0);
-  const inbound = purchases.filter((p) => p.status === "ordered");
+  const endToday = new Date().setHours(23, 59, 59, 999);
+  const startToday = new Date().setHours(0, 0, 0, 0);
+  const inbound = purchases.filter((p) => (p.status === "ordered" || p.status === "partial") && p.expectedAt <= endToday);
+  const late = inbound.filter((p) => p.expectedAt < startToday);
+  const counting = grns.filter((g) => g.status === "counting");
+  const held = products.reduce((s, p) => s + p.quarantine.reduce((a, q) => a + q.qty / p.packSize, 0), 0);
   const dispatch = orders.filter((o) => o.status === "invoiced" && !o.tripId);
   const loading = trips.filter((t) => t.status === "loading");
   const rets = returns.filter((r) => r.status === "pending");
@@ -25,11 +31,11 @@ export default function Warehouse() {
     <div className="mx-auto flex max-w-[1100px] flex-col gap-4">
       <div><h1 className="text-[22px] font-bold">Warehouse floor</h1><p className="text-ink2">Today&apos;s physical work: receive, pick, load, inspect returns.</p></div>
       <div className="grid grid-cols-5 gap-3">
-        <Tile label="Trucks expected" value={inbound.length} sub="Count and enter damages" href="/receiving" />
+        <Tile label="Trucks due" value={inbound.length} sub={late.length ? `${late.length} late. ${counting.length} being counted` : `${counting.length} being counted`} href="/receiving" tone={late.length ? "warn" : undefined} />
         <Tile label="Orders to pick" value={toPick.length} sub={`${Math.round(cartons)} cartons`} href="/pick" tone={toPick.length ? "ok" : undefined} />
         <Tile label="Invoices to load" value={dispatch.length} sub={`${loading.length} load sheets open`} href="/dispatch" />
         <Tile label="Returns to inspect" value={rets.length} sub="Decide good or damaged" href="/returns" tone={rets.length ? "warn" : undefined} />
-        <Tile label="Damaged on hand" value={damaged.reduce((s, p) => s + Math.round(p.damaged / p.packSize * 10) / 10, 0)} sub="Cartons awaiting factory return" href="/stock" />
+        <Tile label="Damaged / on hold" value={`${Math.round(damaged.reduce((s, p) => s + p.damaged / p.packSize, 0) * 10) / 10} / ${Math.round(held * 10) / 10}`} sub="Cartons: damaged · quality hold" href="/receiving" />
       </div>
       <div className="grid grid-cols-3 gap-3">
         <Card title="Sell these first (expiring)">

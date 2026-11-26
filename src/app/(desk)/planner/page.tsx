@@ -4,12 +4,14 @@ import { useStore } from "@/lib/store";
 import { available, coverDays, fmt, velocity } from "@/lib/calc";
 import { Thumb } from "@/components/ui";
 import NewPO from "@/components/NewPO";
+import { remaining } from "@/lib/grn";
 
 export default function Planner() {
   const products = useStore((s) => s.products).filter((p) => p.status === "active");
   const purchases = useStore((s) => s.purchases);
+  const grns = useStore((s) => s.grns);
   const [po, setPo] = useState<Record<string, number> | null>(null);
-  const onOrder = (id: string) => purchases.filter((p) => p.status === "ordered").flatMap((p) => p.lines).filter((l) => l.productId === id).reduce((s, l) => s + l.ordered, 0);
+  const onOrder = (id: string) => purchases.filter((p) => p.status === "ordered" || p.status === "partial").reduce((s, p) => s + remaining(p, grns, id), 0);
   const rows = products.map((p) => {
     const cover = coverDays(p);
     const incoming = onOrder(p.id);

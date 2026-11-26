@@ -1,25 +1,12 @@
 "use client";
 import { useRef, useState } from "react";
+import { resizeImage as resize } from "@/lib/image";
 import { Modal, ask } from "./ui";
 
 export type FieldDef<T> = {
   key: keyof T & string; label: string; type?: "text" | "number" | "select" | "image" | "date";
   options?: [string, string][]; datalist?: string[]; wide?: boolean; required?: boolean; hint?: string;
 };
-
-function resize(file: File): Promise<string> {
-  return new Promise((res) => {
-    const img = new Image();
-    img.onload = () => {
-      const c = document.createElement("canvas");
-      const k = 160 / Math.max(img.width, img.height);
-      c.width = Math.round(img.width * Math.min(1, k)); c.height = Math.round(img.height * Math.min(1, k));
-      c.getContext("2d")!.drawImage(img, 0, 0, c.width, c.height);
-      res(c.toDataURL("image/jpeg", 0.7));
-    };
-    img.src = URL.createObjectURL(file);
-  });
-}
 
 export default function MasterForm<T extends object>({ title, initial, fields, onSave, onClose, footer, validate }: {
   title: string; initial: T; fields: FieldDef<T>[]; onSave: (v: T) => void; onClose: () => void;

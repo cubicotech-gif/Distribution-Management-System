@@ -35,7 +35,8 @@ export interface Product {
   taxPct: number;
   stock: number; // good pcs (sum of batches)
   batches: Batch[];
-  damaged: number; // pcs in quarantine / damaged
+  damaged: number; // pcs damaged, waiting to go back to the supplier
+  quarantine: Batch[]; // held for quality check, not sellable
   reserved: number; // pcs reserved against approved orders
   reorder: number; // pcs
   leadDays: number; // supplier lead time
@@ -139,18 +140,44 @@ export interface Trip {
 export interface PurchaseLine {
   productId: string;
   ordered: number; // cartons
-  received?: number; // cartons counted
-  damaged?: number; // cartons damaged on arrival
-  batch?: string;
-  expiry?: string;
 }
 export interface PurchaseOrder {
   id: string;
   folio: string;
   supplier: string;
   lines: PurchaseLine[];
-  status: "ordered" | "received" | "approved";
+  status: "ordered" | "partial" | "complete" | "closed";
   createdAt: number;
+  expectedAt: number;
+  closedNote?: string;
+}
+
+export interface GrnLine {
+  productId: string;
+  arrived: number; // cartons counted on the truck
+  rejected: number; // refused at the gate (not received)
+  damaged: number; // received but damaged
+  held: number; // received but held for quality check
+  batch: string;
+  expiry: string; // YYYY-MM
+  reason: string; // why rejected / damaged / held
+  photo?: string;
+}
+export interface Grn {
+  id: string;
+  folio: string;
+  poId: string;
+  supplier: string;
+  deliveryNote: string;
+  vehicle: string;
+  driver: string;
+  lines: GrnLine[];
+  status: "counting" | "counted" | "approved";
+  arrivedAt: number;
+  countedAt?: number;
+  approvedAt?: number;
+  by: string;
+  sentBack?: string;
 }
 
 export interface Payment {

@@ -235,19 +235,25 @@ export function Modal({ open, onClose, title, children, width = 560 }: {
 let toastFn: (m: string, o?: { undo?: () => void }) => void = () => {};
 export const toast = (m: string, o?: { undo?: () => void }) => toastFn(m, o);
 export function Toaster() {
-  const [items, setItems] = useState<{ id: number; m: string; undo?: () => void }[]>([]);
+  const [items, setItems] = useState<{ id: number; m: string; n: number; undo?: () => void }[]>([]);
   useEffect(() => {
     toastFn = (m, o) => {
       const id = Math.random();
-      setItems((x) => [...x.slice(-3), { id, m, undo: o?.undo }]);
-      setTimeout(() => setItems((x) => x.filter((i) => i.id !== id)), o?.undo ? 6000 : 2800);
+      const life = o?.undo ? 6000 : 2800;
+      setItems((x) => {
+        const last = x[x.length - 1];
+        // identical message right after itself (e.g. scanning carton after carton): count it instead of stacking
+        if (last && last.m === m && !o?.undo) return [...x.slice(0, -1), { ...last, n: last.n + 1 }];
+        return [...x.slice(-2), { id, m, n: 1, undo: o?.undo }];
+      });
+      setTimeout(() => setItems((x) => x.filter((i) => i.id !== id && !(i.m === m && i.n > 1 && false))), life);
     };
   }, []);
   return (
-    <div className="pointer-events-none fixed bottom-4 left-1/2 z-[80] flex -translate-x-1/2 flex-col items-center gap-2" role="status" aria-live="polite">
+    <div className="pointer-events-none fixed left-1/2 top-16 z-[80] flex -translate-x-1/2 flex-col items-center gap-2" role="status" aria-live="polite">
       {items.map((i) => (
         <div key={i.id} className="slidein pointer-events-auto flex items-center gap-3 rounded-xl bg-[#16201b] px-4 py-2 text-[13px] font-medium text-white shadow-lg">
-          {i.m}
+          {i.m}{i.n > 1 && <span className="num rounded bg-white/15 px-1.5 text-[11px] font-bold">×{i.n}</span>}
           {i.undo && <button className="rounded-md bg-white/15 px-2 py-0.5 text-[12px] font-bold hover:bg-white/25" onClick={() => { i.undo!(); setItems((x) => x.filter((y) => y.id !== i.id)); }}>Undo</button>}
         </div>
       ))}

@@ -8,29 +8,29 @@ Built department by department. Nothing moves to the next department until the c
 ## A. Universal quality (every screen, every department)
 
 ### Loading and waiting
-- ⬜ Skeleton placeholders that match the layout while a screen loads (minimum ~300 ms so they never flicker)
-- ⬜ Spinner inside a button while an action runs; button disabled so it cannot be double-clicked
-- ⬜ No layout jump when data arrives (fixed heights for tables, cards, charts)
+- ✅ Skeleton placeholders that match the layout while a screen loads (minimum ~300 ms so they never flicker)
+- 🟡 Spinner inside a button while an action runs; button disabled so it cannot be double-clicked (done on the main actions: orders, picking, invoicing, dispatch, returns, GRN)
+- ✅ No layout jump when data arrives (skeletons match each screen's layout)
 - ⬜ Fast first paint: fonts preloaded, no flash of unstyled content, no blank white screen between pages
 - ⬜ Optimistic updates (row changes at once, rolls back with a message if it fails)
 - ⬜ Progress feedback for long actions (CSV import, bulk price update, print)
 
 ### Empty, error and edge states
-- ✅ Empty states with a reason (partly: some are only a title). ⬜ Every one gets a reason **and** a primary action
-- ⬜ Error ladder: inline field errors, toast with retry for recoverable errors, banner for page problems, full screen for unrecoverable
-- ⬜ Custom 404 and "something went wrong" pages with a way back
-- ⬜ Offline / connection-lost banner
+- ✅ Empty states with a reason, and an action button where there is a next step
+- ✅ Error ladder: inline field errors, toasts, offline banner, error page for unrecoverable problems
+- ✅ Custom 404 and "something went wrong" pages with a way back
+- ✅ Offline / connection-lost banner
 - ⬜ Very long names, very large numbers, zero values, negative values, missing data: all checked on every table
 - ⬜ Large data: 500+ products, 2,000+ orders stay fast (pagination or virtual lists)
 
 ### Forms
-- 🟡 Validate on blur, not on every keystroke; keep what the user typed after an error; specific messages ("Expiry is in the past", not "Invalid")
-- ⬜ Required-field markers, numeric limits, duplicate-code check, unsaved-changes warning on close
-- ⬜ Enter submits, Esc cancels, sensible Tab order, autofocus on the first field
+- ✅ Validate on blur, keep what the user typed after an error, specific messages (product, customer, supplier, scheme, GRN count, truck arrival)
+- ✅ Required-field markers, numeric limits, duplicate-code check, unsaved-changes warning on close
+- ✅ Enter submits, Esc cancels, sensible Tab order, autofocus on the first field
 
 ### Safety and feedback
-- 🟡 Toast after every action. ⬜ Undo for reversible actions (delete, status change)
-- ⬜ Confirm dialog for destructive or irreversible actions, naming exactly what will happen
+- ✅ Toast after every action; ✅ Undo for hold, block/unblock, deactivate/activate
+- ✅ Confirm dialog for destructive or irreversible actions, naming exactly what will happen
 - ⬜ Permission feedback: a hidden or disabled button always says why on hover
 - ⬜ Audit trail on every business document (who, when, what changed)
 
@@ -38,9 +38,9 @@ Built department by department. Nothing moves to the next department until the c
 - ✅ One design system, light and dark mode. ⬜ Check every screen in dark mode
 - ⬜ Same date, number and currency format everywhere; right-aligned numbers; timestamps relative with exact time on hover
 - ⬜ Consistent icons, spacing, button sizes, chip colours and wording across departments
-- ⬜ Keyboard-shortcut help overlay (press `?`) per screen
+- ✅ Keyboard-shortcut help overlay (press `?`)
 - ⬜ Focus rings, contrast, screen-reader labels on icon buttons
-- ⬜ Browser tab title per page, favicon, no console errors
+- ✅ Browser tab title per page, favicon. ⬜ Console-error sweep on every screen
 
 ### Devices
 - ⬜ Desktop (1280 to 1920) checked on each screen
@@ -48,7 +48,7 @@ Built department by department. Nothing moves to the next department until the c
 - ⬜ Phone layout for field staff (safe areas, one-hand reach, large inputs, numeric keypad)
 
 ### Print and share
-- 🟡 Invoice, challan, load sheet, statement. ⬜ Consistent letterhead, page breaks, A4 and thermal 80 mm, PDF download, WhatsApp share text
+- 🟡 Invoice, challan, load sheet, statement, GRN, carton labels with real Code 39 barcodes. ⬜ Consistent letterhead, page breaks, A4 and thermal 80 mm, PDF download, WhatsApp share text
 
 ### Demo mechanics
 - ⬜ Realistic seed data in every list (no lorem, no empty tables)
@@ -61,20 +61,20 @@ Built department by department. Nothing moves to the next department until the c
 ## B. Warehouse
 
 ### B1. Floor dashboard
-- 🟡 Task tiles (to pick, trucks expected, returns, damaged). ⬜ Live task board with oldest-first ordering and SLA colours (order waiting > 2 h)
+- 🟡 Task tiles (trucks due and late, to pick, returns, damaged / on hold). ⬜ Live task board with oldest-first ordering and SLA colours (order waiting > 2 h)
 - ⬜ Shift summary: lines picked, orders packed, accuracy %, returns processed
-- ⬜ Expected arrivals today with truck / dock time
+- ✅ Expected arrivals grouped Overdue / Today / Coming
 - ⬜ Alerts: expiring batches, bins over capacity, negative stock, pending counts
 
 ### B2. Inbound (receiving)
-- 🟡 Count against PO with damaged, batch, expiry
-- ⬜ Expected deliveries list with supplier delivery note number, vehicle, driver
-- ⬜ Partial receipts and over-receipt tolerance (e.g. +2% allowed, more needs approval)
-- ⬜ Batch and expiry validation: expiry in the past is blocked; short shelf life (< 70% remaining) warns
-- ⬜ Quality inspection result per line: accept / reject / quarantine, with reason and photo
-- ⬜ Discrepancy report and claim to supplier generated automatically
-- ⬜ Print GRN and putaway labels (batch, expiry, bin, barcode)
-- ⬜ Barcode scan or type-ahead entry for fast counting
+- ✅ Count against PO with rejected, damaged, held, batch, expiry
+- ✅ Expected deliveries list; delivery note, vehicle and driver captured when the truck arrives
+- ✅ Partial receipts (several trucks per order, close short) and over-receipt warning beyond 2%
+- ✅ Batch and expiry validation: expired is blocked; under 6 months of shelf life warns
+- ✅ Per-line reject / damaged / hold with reason and photo; ✅ On-hold tab with release or reject
+- ✅ Claims register generated from every delivery (short, rejected, damaged, held, value at cost)
+- ✅ Print GRN and carton labels (batch, expiry, rack, barcode). ⬜ Putaway labels per bin (W2)
+- ✅ Typed-scan counting (code + Enter adds a carton). ⬜ Camera scanning
 
 ### B3. Locations and putaway
 - ⬜ Warehouse layout: zones → aisles → racks → bins; bin master with capacity
