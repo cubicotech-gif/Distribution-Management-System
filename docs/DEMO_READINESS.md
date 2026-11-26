@@ -77,11 +77,15 @@ Built department by department. Nothing moves to the next department until the c
 - ✅ Typed-scan counting (code + Enter adds a carton). ⬜ Camera scanning
 
 ### B3. Locations and putaway
-- ⬜ Warehouse layout: zones → aisles → racks → bins; bin master with capacity
-- ⬜ Putaway suggestion (fast movers near the dock, same product together, bin capacity)
-- ⬜ Confirm putaway per batch to a bin; stock stays "in receiving area" until put away
-- ⬜ Bin-to-bin transfers with reason; bin label print
-- ⬜ Empty-bin and over-capacity views
+- ✅ Warehouse layout: zones → racks → levels → bins; bin master with capacity (add, edit, block, delete when empty). Aisles are not modelled separately
+- ✅ Warehouse map with fill colours, product search highlight, and table / compact views
+- ✅ Putaway suggestion (same batch, home rack floor first, same product, zone overflow; avoids mixing products)
+- ✅ Confirm putaway per batch to a bin with typed bin-scan check; partial quantities; over-capacity warning; "Put all away"
+- 🟡 Received stock sits at the dock until put away, but is already sellable (a picker can take from the dock). ⬜ Option to hold it unsellable until put away
+- ✅ Bin-to-bin transfers with reason and capacity check; ✅ bin labels and putaway labels with barcodes
+- ✅ Empty, nearly full, over-capacity and blocked views
+- ✅ Pick-face replenishment suggestions (floor bin nearly empty while stock is stored higher up)
+- ✅ Pick list and challan show the bin to take from
 
 ### B4. Stock control
 - 🟡 Stock by batch with expiry. ⬜ Stock by bin and by status (available, reserved, quarantine, damaged, expired)

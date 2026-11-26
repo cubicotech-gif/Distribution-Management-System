@@ -4,14 +4,14 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ClipboardList, FileText, Truck, Boxes, Users, Wallet, PackageCheck, LayoutGrid, Package, Search,
-  Moon, Sun, LogOut, Command, RotateCcw, Plus, ArrowRight, ShieldCheck, BarChart3, UserCog, Landmark, Route, Undo2, Gauge, MapPinned, Building2, History,
+  Moon, Sun, LogOut, Command, RotateCcw, Plus, ArrowRight, ShieldCheck, BarChart3, UserCog, Landmark, Route, Undo2, Gauge, MapPinned, Building2, History, MapPin, ArrowDownToLine,
 } from "lucide-react";
 import { HOME, useStore, useUser } from "@/lib/store";
 import type { Role } from "@/lib/types";
 import { Avatar, ConfirmHost, Kbd, Modal, Toaster, ask, useHydrated, toast } from "./ui";
 import SkeletonPage from "./Skeleton";
 
-type Badge = "orders" | "pick" | "invoice" | "receive" | "approvals" | "returns" | "dispatch" | "settle" | "plan";
+type Badge = "putaway" | "orders" | "pick" | "invoice" | "receive" | "approvals" | "returns" | "dispatch" | "settle" | "plan";
 type Nav = { href: string; label: string; icon: React.ComponentType<{ size?: number }>; roles: Role[]; badge?: Badge };
 const NAV: Nav[] = [
   { href: "/dashboard", label: "Today", icon: LayoutGrid, roles: ["admin", "sales", "purchasing", "warehouse"] },
@@ -30,9 +30,11 @@ const NAV: Nav[] = [
   { href: "/changelog", label: "Change log", icon: History, roles: ["sales", "admin"] },
   // Warehouse
   { href: "/receiving", label: "Inbound (GRN)", icon: PackageCheck, roles: ["warehouse"], badge: "receive" },
+  { href: "/putaway", label: "Putaway", icon: ArrowDownToLine, roles: ["warehouse"], badge: "putaway" },
   { href: "/pick", label: "Pick & challan", icon: Truck, roles: ["warehouse"], badge: "pick" },
   { href: "/dispatch", label: "Dispatch", icon: Route, roles: ["warehouse"], badge: "dispatch" },
   { href: "/returns", label: "Returns", icon: Undo2, roles: ["warehouse"], badge: "returns" },
+  { href: "/locations", label: "Locations", icon: MapPin, roles: ["warehouse", "admin"] },
   // Purchasing
   { href: "/planner", label: "Reorder planner", icon: Gauge, roles: ["purchasing"], badge: "plan" },
   { href: "/receiving", label: "Orders & GRN", icon: PackageCheck, roles: ["purchasing"], badge: "receive" },
@@ -121,6 +123,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }, [path]);
 
   const badges = useMemo(() => ({
+    putaway: products.filter((p) => p.batches.some((b) => b.bin === "RCV" && b.qty > 0)).length,
     orders: orders.filter((o) => o.status === "booked" || (o.status === "hold" && !o.needsOwner)).length,
     pick: orders.filter((o) => o.status === "approved").length,
     invoice: orders.filter((o) => o.status === "picked").length,
@@ -139,7 +142,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }
   const nav = NAV.filter((n) => n.roles.includes(user.role));
   const current = nav.find((n) => path.startsWith(n.href));
-  const kind = path.startsWith("/dashboard") ? "tiles" : ["/orders", "/pick", "/receiving", "/dispatch", "/returns", "/settlements", "/approvals"].some((x) => path.startsWith(x)) ? "split" : "table";
+  const kind = path.startsWith("/dashboard") ? "tiles" : ["/orders", "/pick", "/receiving", "/dispatch", "/returns", "/settlements", "/approvals", "/putaway"].some((x) => path.startsWith(x)) ? "split" : "table";
 
   return (
     <div className="flex h-screen overflow-hidden">

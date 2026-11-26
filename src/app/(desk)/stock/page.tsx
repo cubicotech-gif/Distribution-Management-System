@@ -85,7 +85,7 @@ function Stock() {
                   <tr key={p.id} className="row-hover cursor-pointer border-t border-line" onClick={() => setOpen(open === p.id ? null : p.id)}>
                     <td className="pl-3"><ChevronRight size={14} className={`text-ink3 transition ${open === p.id ? "rotate-90" : ""}`} /></td>
                     <td className="py-2"><div className="flex items-center gap-2.5"><Thumb p={p} size={28} /><div><div className="font-semibold">{p.name} {p.status === "unlisted" && <span className="chip chip-warn ml-1">Not listed</span>}{p.status === "inactive" && <span className="chip chip-mute ml-1">Inactive</span>}</div><div className="num text-[11px] text-ink3">{p.code} · {p.packSize} pcs/ctn</div></div></div></td>
-                    <td className="num font-semibold">{p.bin}</td>
+                    <td className="num font-semibold">{p.bin}{p.batches.some((b) => b.bin === "RCV") && <span className="chip chip-warn ml-1.5 !py-0 text-[9.5px]">dock</span>}</td>
                     <td className="num text-right">{fmt(p.stock / p.packSize)}</td>
                     <td className="num text-right text-ink2">{fmt(p.reserved / p.packSize)}</td>
                     <td className="num text-right"><span className={`chip ${isLow ? "chip-warn" : "chip-ok"}`}>{fmt(av / p.packSize)}</span></td>
@@ -100,7 +100,7 @@ function Stock() {
                       <div className="flex flex-wrap gap-2">
                         {[...p.batches].sort((a, b) => a.expiry.localeCompare(b.expiry)).map((b, i) => {
                           const m = monthsLeft(b.expiry);
-                          return <div key={b.id} className="rounded-lg border border-line bg-panel px-3 py-1.5"><div className="num text-[12px] font-semibold">{b.no} {i === 0 && <span className="text-[10px] font-bold text-accent">PICKS FIRST</span>}</div><div className="flex items-center gap-2 text-[11px] text-ink2"><span className="num">{fmt(b.qty / p.packSize)} ctn</span><span className={`chip ${m <= 1 ? "chip-bad" : m <= 2 ? "chip-warn" : "chip-mute"}`}>exp {b.expiry} · {m}mo</span></div></div>;
+                          return <div key={b.id} className="rounded-lg border border-line bg-panel px-3 py-1.5"><div className="num text-[12px] font-semibold">{b.no} <span className="font-normal text-ink3">· {b.bin}</span> {i === 0 && <span className="text-[10px] font-bold text-accent">PICKS FIRST</span>}</div><div className="flex items-center gap-2 text-[11px] text-ink2"><span className="num">{fmt(b.qty / p.packSize)} ctn</span><span className={`chip ${m <= 1 ? "chip-bad" : m <= 2 ? "chip-warn" : "chip-mute"}`}>exp {b.expiry} · {m}mo</span></div></div>;
                         })}
                       </div>
                     </td></tr>

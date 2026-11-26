@@ -1,12 +1,13 @@
 "use client";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { CUSTOMERS, GRNS, ORDERS, PAYMENTS, PRICE_LISTS, PRODUCTS, PURCHASES, RETURNS, ROUTES, SCHEMES, SUPPLIERS, TRIPS, USERS } from "./seed";
+import { BINS, CUSTOMERS, GRNS, ORDERS, PAYMENTS, PRICE_LISTS, PRODUCTS, PURCHASES, RETURNS, ROUTES, SCHEMES, SUPPLIERS, TRIPS, USERS } from "./seed";
 import { accepted, good, receivedSoFar } from "./grn";
+import { DOCK, HOLD, binUsed } from "./locations";
 import { applySchemes, orderDue, orderTotal, pcsOf, totals, unpaidOrders } from "./calc";
 import type {
   Activity, Allocation, Approval, Customer, Line, Order, OrderStatus, Payment, Product, PurchaseOrder,
-  ChangeEntry, Grn, GrnLine, PriceChange, PriceList, ProductStatus, ReturnNote, ReturnReason, Role, Route, Scheme, StockAdj, Supplier, SupplierReturn, Trip, User,
+  Bin, ChangeEntry, Grn, GrnLine, PriceChange, PriceList, ProductStatus, ReturnNote, ReturnReason, Role, Route, Scheme, StockAdj, StockMove, Supplier, SupplierReturn, Trip, User,
 } from "./types";
 
 const uid = () => Math.random().toString(36).slice(2, 9);
@@ -17,21 +18,21 @@ export const ADJ_LIMIT = 20000; // Rs. stock-count variance above which the owne
 const cloneP = (ps: Product[]) => ps.map((p) => ({ ...p, batches: p.batches.map((b) => ({ ...b })) }));
 
 /** Take pcs from the earliest-expiry batches first. Mutates the (cloned) product. */
-function fefo(p: Product, pcs: number): { batch: string; expiry: string; pcs: number }[] {
-  const out: { batch: string; expiry: string; pcs: number }[] = [];
+function fefo(p: Product, pcs: number): { batch: string; expiry: string; pcs: number; bin: string }[] {
+  const out: { batch: string; expiry: string; pcs: number; bin: string }[] = [];
   let need = pcs;
   for (const b of [...p.batches].sort((a, b) => a.expiry.localeCompare(b.expiry))) {
     if (need <= 0) break;
     const take = Math.min(b.qty, need);
-    if (take > 0) { b.qty -= take; need -= take; out.push({ batch: b.no, expiry: b.expiry, pcs: take }); }
+    if (take > 0) { b.qty -= take; need -= take; out.push({ batch: b.no, expiry: b.expiry, pcs: take, bin: b.bin }); }
   }
   p.batches = p.batches.filter((b) => b.qty > 0);
   p.stock = p.batches.reduce((s, b) => s + b.qty, 0);
   return out;
 }
-function addBatch(p: Product, no: string, expiry: string, pcs: number) {
-  const ex = p.batches.find((b) => b.no === no);
-  if (ex) ex.qty += pcs; else p.batches.push({ id: uid(), no, expiry, qty: pcs });
+function addBatch(p: Product, no: string, expiry: string, pcs: number, bin: string = DOCK) {
+  const ex = p.batches.find((b) => b.no === no && b.bin === bin);
+  if (ex) ex.qty += pcs; else p.batches.push({ id: uid(), no, expiry, qty: pcs, bin });
   p.stock = p.batches.reduce((s, b) => s + b.qty, 0);
 }
 
@@ -66,6 +67,8 @@ const seedState = () => ({
   routes: ROUTES.map((r) => ({ ...r })) as Route[],
   priceLists: PRICE_LISTS.map((l) => ({ ...l, overrides: { ...l.overrides } })) as PriceList[],
   suppliers: SUPPLIERS.map((x) => ({ ...x })) as Supplier[],
+  bins: BINS.map((b) => ({ ...b })) as Bin[],
+  moves: [] as StockMove[],
   changeLog: [] as ChangeEntry[],
   activity: [] as Activity[],
   seq: 43,
@@ -90,6 +93,8 @@ interface State {
   routes: Route[];
   priceLists: PriceList[];
   suppliers: Supplier[];
+  bins: Bin[];
+  moves: StockMove[];
   changeLog: ChangeEntry[];
   activity: Activity[];
   seq: number;
@@ -157,6 +162,10 @@ interface State {
   deleteRoute: (id: string) => boolean;
   upsertPriceList: (l: PriceList) => void;
   deletePriceList: (id: string) => boolean;
+  moveStock: (o: { productId: string; batch: string; from: string; to: string; qtyPcs: number; kind: "putaway" | "transfer"; reason: string; by: string; force?: boolean }) => { ok: boolean; reason?: string };
+  upsertBin: (b: Bin) => void;
+  setBinBlocked: (code: string, blocked: boolean, note?: string) => void;
+  deleteBin: (code: string) => boolean;
   upsertSupplier: (x: Supplier) => void;
   deleteSupplier: (id: string) => boolean;
   upsertScheme: (s: Scheme) => void;
@@ -505,7 +514,7 @@ export const useStore = create<State>()(
           const gd = good(l) * p.packSize;
           if (gd > 0) addBatch(p, l.batch.trim(), l.expiry, gd);
           p.damaged += l.damaged * p.packSize;
-          if (l.held > 0) p.quarantine.push({ id: uid(), no: l.batch.trim() || "HOLD", expiry: l.expiry || "2027-12", qty: l.held * p.packSize });
+          if (l.held > 0) p.quarantine.push({ id: uid(), no: l.batch.trim() || "HOLD", expiry: l.expiry || "2027-12", qty: l.held * p.packSize, bin: HOLD });
         }
         const grns = s.grns.map((x) => (x.id === grnId ? { ...x, status: "approved" as const, approvedAt: Date.now() } : x));
         const po = s.purchases.find((x) => x.id === g.poId)!;
@@ -728,6 +737,44 @@ export const useStore = create<State>()(
         set({ priceLists: s.priceLists.filter((x) => x.id !== id), changeLog: aud(s, "price list", `Deleted price list ${l.name}`) });
         return true;
       },
+      moveStock: ({ productId, batch, from, to, qtyPcs, kind, reason, by, force }) => {
+        const s = get();
+        const dest = s.bins.find((b) => b.code === to);
+        const src = s.products.find((x) => x.id === productId);
+        if (!dest || !src) return { ok: false, reason: "Bin not found" };
+        if (from === to) return { ok: false, reason: "Choose a different bin" };
+        if (dest.blocked) return { ok: false, reason: `${to} is blocked` };
+        if (dest.zone === "R") return { ok: false, reason: "The dock is for arrivals only" };
+        const row = src.batches.find((b) => b.no === batch && b.bin === from);
+        if (!row || row.qty < qtyPcs || qtyPcs <= 0) return { ok: false, reason: "Not enough stock in the source bin" };
+        const free = dest.capacity - binUsed(s.products, to);
+        if (qtyPcs / src.packSize > free + 0.001 && !force) return { ok: false, reason: `${to} only has room for ${Math.floor(free)} more cartons` };
+        const products = cloneP(s.products);
+        const p = products.find((x) => x.id === productId)!;
+        const r = p.batches.find((b) => b.no === batch && b.bin === from)!;
+        r.qty -= qtyPcs;
+        p.batches = p.batches.filter((b) => b.qty > 0);
+        addBatch(p, batch, r.expiry, qtyPcs, to);
+        const mv: StockMove = { id: uid(), at: Date.now(), by, kind, productId, batch, qty: qtyPcs, from, to, reason };
+        set({
+          products, moves: [mv, ...s.moves].slice(0, 400),
+          activity: log(s, `${by} ${kind === "putaway" ? "put away" : "moved"} ${Math.round((qtyPcs / src.packSize) * 10) / 10} ctn of ${src.name} (${batch}) ${from} → ${to}`),
+        });
+        return { ok: true };
+      },
+      upsertBin: (b) =>
+        set((s) => {
+          const exists = s.bins.some((x) => x.code === b.code);
+          return { bins: exists ? s.bins.map((x) => (x.code === b.code ? b : x)) : [...s.bins, b], changeLog: aud(s, "bin", `${exists ? "Edited" : "Added"} bin ${b.code} (capacity ${b.capacity} ctn)`) };
+        }),
+      setBinBlocked: (code, blocked, note) =>
+        set((s) => ({ bins: s.bins.map((b) => (b.code === code ? { ...b, blocked, note: blocked ? note : b.note } : b)), changeLog: aud(s, "bin", `${blocked ? "Blocked" : "Unblocked"} bin ${code}${note ? ` (${note})` : ""}`) })),
+      deleteBin: (code) => {
+        const s = get();
+        if (code === DOCK || code === HOLD || binUsed(s.products, code) > 0) return false;
+        set({ bins: s.bins.filter((b) => b.code !== code), changeLog: aud(s, "bin", `Deleted bin ${code}`) });
+        return true;
+      },
       upsertSupplier: (x) =>
         set((s) => {
           const old = s.suppliers.find((y) => y.id === x.id);
@@ -753,8 +800,8 @@ export const useStore = create<State>()(
       setBookerTarget: (id, target) => set((s) => ({ users: s.users.map((u) => (u.id === id ? { ...u, target } : u)) })),
     }),
     {
-      name: "zarie-dms-v6",
-      version: 6,
+      name: "zarie-dms-v7",
+      version: 7,
       // The signed-in user belongs to this tab only; the business data is shared by every tab.
       partialize: (s) => Object.fromEntries(Object.entries(s).filter(([k]) => k !== "userId")) as unknown as State,
     }
@@ -770,7 +817,7 @@ function applyDelta(products: Product[], productId: string, delta: number) {
   const p = ps.find((x) => x.id === productId)!;
   if (delta > 0) {
     const last = [...p.batches].sort((a, b) => b.expiry.localeCompare(a.expiry))[0];
-    addBatch(p, last?.no ?? "ADJ", last?.expiry ?? "2027-12", delta);
+    addBatch(p, last?.no ?? "ADJ", last?.expiry ?? "2027-12", delta, last?.bin ?? DOCK);
   } else fefo(p, -delta);
   return ps;
 }
@@ -795,6 +842,6 @@ export type { Role };
 // Keep open tabs in step: when another tab changes the data, pick it up straight away.
 if (typeof window !== "undefined") {
   window.addEventListener("storage", (e) => {
-    if (e.key === "zarie-dms-v6") useStore.persist.rehydrate();
+    if (e.key === "zarie-dms-v7") useStore.persist.rehydrate();
   });
 }

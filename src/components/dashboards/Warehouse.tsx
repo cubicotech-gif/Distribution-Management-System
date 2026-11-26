@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { useStore } from "@/lib/store";
 import { available, monthsLeft, pcsOf } from "@/lib/calc";
+import { DOCK, binUsed, replenishments } from "@/lib/locations";
 import { Card, Row, Tile } from "../dash";
 
 export default function Warehouse() {
@@ -19,6 +20,10 @@ export default function Warehouse() {
   const inbound = purchases.filter((p) => (p.status === "ordered" || p.status === "partial") && p.expectedAt <= endToday);
   const late = inbound.filter((p) => p.expectedAt < startToday);
   const counting = grns.filter((g) => g.status === "counting");
+  const bins = useStore((s) => s.bins);
+  const dock = products.flatMap((p) => p.batches.filter((b) => b.bin === DOCK && b.qty > 0));
+  const full = bins.filter((b) => !b.blocked && binUsed(products, b.code) > b.capacity + 0.001).length;
+  const repl = replenishments(products, bins).length;
   const held = products.reduce((s, p) => s + p.quarantine.reduce((a, q) => a + q.qty / p.packSize, 0), 0);
   const dispatch = orders.filter((o) => o.status === "invoiced" && !o.tripId);
   const loading = trips.filter((t) => t.status === "loading");
@@ -30,8 +35,9 @@ export default function Warehouse() {
   return (
     <div className="mx-auto flex max-w-[1100px] flex-col gap-4">
       <div><h1 className="text-[22px] font-bold">Warehouse floor</h1><p className="text-ink2">Today&apos;s physical work: receive, pick, load, inspect returns.</p></div>
-      <div className="grid grid-cols-5 gap-3">
+      <div className="grid grid-cols-6 gap-3">
         <Tile label="Trucks due" value={inbound.length} sub={late.length ? `${late.length} late. ${counting.length} being counted` : `${counting.length} being counted`} href="/receiving" tone={late.length ? "warn" : undefined} />
+        <Tile label="To put away" value={dock.length} sub={full || repl ? `${full ? full + " bins over capacity. " : ""}${repl ? repl + " pick faces to refill" : ""}` : "Batches at the dock"} href="/putaway" tone={dock.length ? "warn" : undefined} />
         <Tile label="Orders to pick" value={toPick.length} sub={`${Math.round(cartons)} cartons`} href="/pick" tone={toPick.length ? "ok" : undefined} />
         <Tile label="Invoices to load" value={dispatch.length} sub={`${loading.length} load sheets open`} href="/dispatch" />
         <Tile label="Returns to inspect" value={rets.length} sub="Decide good or damaged" href="/returns" tone={rets.length ? "warn" : undefined} />

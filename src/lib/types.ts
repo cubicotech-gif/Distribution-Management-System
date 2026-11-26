@@ -15,6 +15,7 @@ export interface Batch {
   no: string;
   expiry: string; // YYYY-MM
   qty: number; // pcs
+  bin: string; // storage location code, RCV = receiving dock
 }
 
 export type ProductStatus = "active" | "inactive" | "unlisted";
@@ -98,6 +99,7 @@ export interface Allocation {
   batch: string;
   expiry: string;
   pcs: number;
+  bin?: string;
 }
 
 export interface Order {
@@ -300,6 +302,27 @@ export interface ChangeEntry {
   id: string;
   at: number;
   by: string;
-  entity: "product" | "customer" | "route" | "price list" | "supplier" | "scheme";
+  entity: "product" | "customer" | "route" | "price list" | "supplier" | "scheme" | "bin";
   text: string;
+}
+
+export interface Bin {
+  code: string; // Z-RR-L, e.g. A-01-1 (zone A, rack 01, level 1 = floor)
+  zone: string;
+  capacity: number; // cartons
+  blocked?: boolean;
+  note?: string;
+}
+
+export interface StockMove {
+  id: string;
+  at: number;
+  by: string;
+  kind: "putaway" | "transfer";
+  productId: string;
+  batch: string;
+  qty: number; // pcs
+  from: string;
+  to: string;
+  reason: string;
 }

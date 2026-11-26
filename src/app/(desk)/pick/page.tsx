@@ -9,12 +9,12 @@ import type { Order, Product } from "@/lib/types";
 
 // which batches FEFO would take for this many pcs (preview only)
 function preview(p: Product, pcs: number) {
-  const out: { no: string; expiry: string; pcs: number }[] = [];
+  const out: { no: string; expiry: string; pcs: number; bin: string }[] = [];
   let need = pcs;
   for (const b of [...p.batches].sort((a, b) => a.expiry.localeCompare(b.expiry))) {
     if (need <= 0) break;
     const t = Math.min(b.qty, need);
-    out.push({ no: b.no, expiry: b.expiry, pcs: t }); need -= t;
+    out.push({ no: b.no, expiry: b.expiry, pcs: t, bin: b.bin }); need -= t;
   }
   return out;
 }
@@ -93,7 +93,7 @@ export default function Pick() {
             </div>
             <div className="min-h-0 flex-1 overflow-auto px-5 py-3">
               <table className="w-full text-[12.5px]">
-                <thead><tr className="th text-left"><th className="py-2">Rack</th><th>Product</th><th>Take from batch</th><th className="text-right">Ordered</th><th className="text-right">On shelf</th><th className="text-right">Picked</th></tr></thead>
+                <thead><tr className="th text-left"><th className="py-2">Rack</th><th>Product</th><th>Take from (bin · batch)</th><th className="text-right">Ordered</th><th className="text-right">On shelf</th><th className="text-right">Picked</th></tr></thead>
                 <tbody>
                   {cur.lines.map((l, i) => ({ l, i, p: products.find((x) => x.id === l.productId)! })).sort((a, b) => a.p.bin.localeCompare(b.p.bin)).map(({ l, i, p }) => {
                     const shelfPcs = p.stock;
@@ -104,7 +104,7 @@ export default function Pick() {
                       <tr key={i} className="border-t border-line align-top">
                         <td className="num py-2 font-semibold">{p.bin}</td>
                         <td className="py-2"><div className="flex items-center gap-2"><Thumb p={p} size={26} /><div><div className="font-medium">{p.name}</div><div className="num text-[11px] text-ink3">{p.code} · {l.unit.toUpperCase()}</div></div></div></td>
-                        <td className="py-2">{take.map((t) => <div key={t.no} className="num text-[11.5px]"><span className="font-semibold">{t.no}</span> <span className="text-ink3">exp {t.expiry}</span> · {fmt(t.pcs / (l.unit === "ctn" ? p.packSize : 1))}</div>)}</td>
+                        <td className="py-2">{take.map((t) => <div key={t.no + t.bin} className="num text-[11.5px]"><span className="font-semibold">{t.bin}</span> · {t.no} <span className="text-ink3">exp {t.expiry}</span> · <b>{fmt(t.pcs / (l.unit === "ctn" ? p.packSize : 1))}</b>{t.bin === "RCV" && <span className="chip chip-warn ml-1 !py-0 text-[9.5px]">dock</span>}</div>)}</td>
                         <td className="num py-2 text-right font-semibold">{l.qty}</td>
                         <td className="py-2 text-right"><span className={`chip num ${shelf < l.qty ? "chip-bad" : "chip-ok"}`}>{fmt(shelf)}</span></td>
                         <td className="w-44 py-2 text-right">

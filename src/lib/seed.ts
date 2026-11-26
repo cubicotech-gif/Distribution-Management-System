@@ -1,4 +1,4 @@
-import type { Customer, Grn, Order, Payment, PriceList, Product, PurchaseOrder, User, Line, OrderStatus, Stamp, ReturnNote, Route, Scheme, Supplier, Trip } from "./types";
+import type { Bin, Customer, Grn, Order, Payment, PriceList, Product, PurchaseOrder, User, Line, OrderStatus, Stamp, ReturnNote, Route, Scheme, Supplier, Trip } from "./types";
 
 export const USERS: User[] = [
   { id: "u-admin", name: "Zarie Khan", initials: "ZK", role: "admin", title: "Owner" },
@@ -17,7 +17,7 @@ const P = (
   id: string, code: string, name: string, brand: string, supplier: string, packSize: number, cartonPrice: number,
   costPct: number, batches: B[], reorderCtn: number, hue: number, bin: string, leadDays: number
 ): Omit<Product, "category" | "barcode"> => {
-  const bs = batches.map(([no, expiry, ctn], i) => ({ id: `${id}-b${i}`, no, expiry, qty: ctn * packSize }));
+  const bs = batches.map(([no, expiry, ctn], i) => ({ id: `${id}-b${i}`, no, expiry, qty: ctn * packSize, bin: "" }));
   return {
     id, status: "active", code, name, brand, supplier, packSize, cartonPrice, costPrice: Math.round(cartonPrice * costPct),
     taxPct: 18, batches: bs, stock: bs.reduce((s, b) => s + b.qty, 0), damaged: 0, quarantine: [], reserved: 0,
@@ -49,6 +49,51 @@ const CAT: Record<string, string> = {
   p11: "Snacks & biscuits", p13: "Snacks & biscuits",
 };
 export const PRODUCTS: Product[] = RAW_PRODUCTS.map((p, i) => ({ ...p, category: CAT[p.id] ?? "General", barcode: `896400${String(1000 + i * 37).padStart(6, "0")}` }));
+
+export const ZONES: Record<string, string> = {
+  A: "Home & personal care", B: "Tea & beverages", C: "Oil & heavy goods", D: "Dairy & snacks (short shelf life)",
+  E: "New items & overflow", Q: "Quality hold", R: "Receiving dock",
+};
+const LEVEL_CAP = [60, 40, 30]; // cartons per level, level 1 is the floor / pick face
+
+function buildBins(): Bin[] {
+  const racks = new Set<string>(["A-07", "B-03", "E-01", "E-02"]);
+  for (const p of PRODUCTS) if (p.bin) racks.add(p.bin);
+  const out: Bin[] = [];
+  for (const r of Array.from(racks).sort()) for (let l = 1; l <= 3; l++) out.push({ code: `${r}-${l}`, zone: r[0], capacity: LEVEL_CAP[l - 1] });
+  for (const z of ["A", "B", "C", "D"]) out.push({ code: `${z}-OV`, zone: z, capacity: 200, note: "Overflow" });
+  out.push({ code: "Q-01", zone: "Q", capacity: 100, note: "Quality hold cage" });
+  out.push({ code: "RCV", zone: "R", capacity: 500, note: "Receiving dock" });
+  return out;
+}
+export const BINS: Bin[] = buildBins();
+
+// Spread each product's batches over its rack: floor first, then upper levels, then the zone overflow.
+(function assignBins() {
+  const dock = PRODUCTS.find((x) => x.id === "p6")!; // a Dalda delivery that has not been put away yet
+  dock.batches.push({ id: "p6-b9", no: "DL2706", expiry: "2027-06", qty: 6 * dock.packSize, bin: "RCV" });
+  for (const p of PRODUCTS) {
+    const free = [1, 2, 3].map((l) => ({ code: `${p.bin}-${l}`, left: LEVEL_CAP[l - 1] }));
+    const fixed = p.batches.filter((b) => b.bin);
+    const toPlace = p.batches.filter((b) => !b.bin).sort((a, b) => a.expiry.localeCompare(b.expiry));
+    void fixed;
+    const rows: typeof p.batches = [...fixed];
+    for (const b of toPlace) {
+      let left = Math.round(b.qty / p.packSize);
+      let n = 0;
+      while (left > 0) {
+        const slot = free.find((f) => f.left > 0);
+        const take = slot ? Math.min(left, slot.left) : left;
+        const code = slot ? slot.code : `${p.bin[0]}-OV`;
+        if (slot) slot.left -= take;
+        rows.push({ id: `${b.id}-${n++}`, no: b.no, expiry: b.expiry, qty: take * p.packSize, bin: code });
+        left -= take;
+      }
+    }
+    p.batches = rows;
+    p.stock = rows.reduce((s, b) => s + b.qty, 0);
+  }
+})();
 
 const C = (
   id: string, name: string, area: string, route: string, bookerId: string, type: "credit" | "cash",
