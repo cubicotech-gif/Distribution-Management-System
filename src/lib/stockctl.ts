@@ -53,6 +53,7 @@ export const KIND: Record<StockEntry["kind"], { label: string; tone: "in" | "out
   adjustment: { label: "Count adjustment", tone: "flag" }, transfer: { label: "Moved", tone: "move" }, putaway: { label: "Put away", tone: "move" },
   hold: { label: "Quality hold", tone: "flag" }, release: { label: "Released", tone: "in" }, damaged: { label: "Damaged", tone: "flag" },
   "supplier-return": { label: "To supplier", tone: "out" }, "write-off": { label: "Written off", tone: "out" }, recall: { label: "Recall hold", tone: "flag" },
+  issue: { label: "Issued (sample / internal)", tone: "out" }, destroy: { label: "Destroyed", tone: "out" },
 };
 
 /** Entries for one product, newest first, each with the good on-hand balance AFTER it (worked back from today's stock). */

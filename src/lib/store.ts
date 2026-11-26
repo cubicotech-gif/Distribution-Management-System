@@ -4,10 +4,12 @@ import { persist } from "zustand/middleware";
 import { BINS, CUSTOMERS, GRNS, LEDGER, ORDERS, PAYMENTS, PRICE_LISTS, PRODUCTS, PURCHASES, RETURNS, ROUTES, SCHEMES, SUPPLIERS, TRIPS, USERS } from "./seed";
 import { accepted, good, receivedSoFar } from "./grn";
 import { DOCK, HOLD, binUsed } from "./locations";
+import { ADJ_CODES } from "./types";
+import { lineDelta } from "./counts";
 import { applySchemes, isExpired, orderDue, sellable, orderTotal, pcsOf, totals, unpaidOrders } from "./calc";
 import type {
   Activity, Allocation, Approval, Customer, Line, Order, OrderStatus, Payment, Product, PurchaseOrder,
-  Bin, ChangeEntry, EntryKind, Grn, GrnLine, PriceChange, PriceList, ProductStatus, ReturnNote, ReturnReason, Role, Route, Scheme, StockAdj, StockEntry, StockMove, Supplier, SupplierReturn, Trip, User,
+  AdjCode, Bin, ChangeEntry, CountLine, CountSession, Destruction, Disposition, EntryKind, Grn, GrnLine, PriceChange, PriceList, ProductStatus, ReturnNote, ReturnReason, Role, Route, Scheme, StockAdj, StockEntry, StockMove, Supplier, SupplierReturn, Trip, User,
 } from "./types";
 
 const uid = () => Math.random().toString(36).slice(2, 9);
@@ -71,6 +73,8 @@ const seedState = () => ({
   bins: BINS.map((b) => ({ ...b })) as Bin[],
   moves: [] as StockMove[],
   ledger: LEDGER.map((e) => ({ ...e })) as StockEntry[],
+  destructions: [] as Destruction[],
+  counts: [] as CountSession[],
   changeLog: [] as ChangeEntry[],
   activity: [] as Activity[],
   seq: 43,
@@ -98,6 +102,8 @@ interface State {
   bins: Bin[];
   moves: StockMove[];
   ledger: StockEntry[];
+  destructions: Destruction[];
+  counts: CountSession[];
   changeLog: ChangeEntry[];
   activity: Activity[];
   seq: number;
@@ -134,7 +140,10 @@ interface State {
 
   // returns
   reportReturn: (orderId: string, productId: string, qtyPcs: number, reason: ReturnReason, by: string) => void;
-  inspectReturn: (id: string, condition: "good" | "damaged", by: string) => void;
+  receiveReturn: (id: string, countedPcs: number, note: string, photo: string | undefined, by: string) => void;
+  gradeReturn: (id: string, disposition: Disposition, credit: boolean, by: string) => void;
+  requestDestruction: (productId: string, qtyPcs: number, reason: string, by: string) => void;
+  completeDestruction: (id: string, witness: string, method: string, by: string) => void;
   createSupplierReturn: (productId: string, qtyPcs: number, reason: string, by: string) => void;
 
   // stock in
@@ -148,7 +157,13 @@ interface State {
   closePoShort: (poId: string, note: string) => void;
   releaseQuarantine: (productId: string, batchId: string, action: "release" | "reject", by: string) => void;
   scanGrn: (grnId: string, code: string) => { ok: boolean; name?: string };
-  cycleCount: (productId: string, counted: number, reason: string, by: string) => void;
+  applyAdjustment: (a: { productId: string; deltaPcs: number; code: AdjCode; reason: string; by: string; bin?: string; batch?: string; sessionId?: string; counted?: number }) => StockAdj;
+  issueStock: (productId: string, pcs: number, code: AdjCode, note: string, by: string) => StockAdj | undefined;
+  startCount: (productIds: string[] | "all", mode: "cycle" | "full", by: string) => string;
+  setCountLine: (sessionId: string, idx: number, patch: Partial<CountLine>) => void;
+  submitCount: (sessionId: string) => void;
+  discardCount: (sessionId: string) => void;
+  postCount: (sessionId: string, by: string) => { applied: number; pending: number };
 
   // owner
   approveRequest: (id: string, by: string) => void;
@@ -467,31 +482,83 @@ export const useStore = create<State>()(
         set({ returns: [note, ...s.returns], activity: log(s, `${note.folio}: ${qtyPcs} pcs of ${p.name} coming back (${reason})`) });
       },
 
-      inspectReturn: (id, condition, by) => {
+      receiveReturn: (id, countedPcs, note, photo, by) => {
         const s = get();
         const r = s.returns.find((x) => x.id === id);
-        if (!r || r.status !== "pending") return;
+        if (!r || r.status !== "pending" || countedPcs <= 0 || countedPcs > r.qtyPcs) return;
+        const p = s.products.find((x) => x.id === r.productId);
+        set({
+          returns: s.returns.map((x) => (x.id === id ? { ...x, status: "received", receivedQty: countedPcs, receivedAt: Date.now(), receivedBy: by, intakeNote: note || undefined, photo } : x)),
+          activity: log(s, `${by} received ${countedPcs} pcs of ${p?.name} back at the dock (${r.folio})${countedPcs < r.qtyPcs ? `, ${r.qtyPcs - countedPcs} fewer than reported` : ""}`),
+        });
+      },
+
+      gradeReturn: (id, disposition, credit, by) => {
+        const s = get();
+        const r = s.returns.find((x) => x.id === id);
+        if (!r || r.status !== "received") return;
         const o = s.orders.find((x) => x.id === r.orderId);
         const l = o?.lines.find((x) => x.productId === r.productId);
         const p = s.products.find((x) => x.id === r.productId);
         if (!o || !l || !p) return;
+        const qty = r.receivedQty ?? r.qtyPcs;
         const perPcs = (l.unit === "ctn" ? l.rate / p.packSize : l.rate) * (1 - l.discPct / 100) * 1.18;
-        const value = Math.round(perPcs * r.qtyPcs);
+        const value = credit ? Math.round(perPcs * qty) : 0;
         const products = cloneP(s.products);
         const pp = products.find((x) => x.id === r.productId)!;
-        const retBatch = `RET-${r.folio.slice(3)}`;
-        if (condition === "good") addBatch(pp, retBatch, (pp.batches[0]?.expiry ?? "2027-06"), r.qtyPcs);
-        else pp.damaged += r.qtyPcs;
+        // put it back into the batch the customer originally got, when we know it
+        const al = o.allocation?.find((a) => o.lines[a.i]?.productId === r.productId);
+        const origBatch = al?.batch ?? `RET-${r.folio.slice(3)}`;
+        const origExpiry = al?.expiry ?? pp.batches[0]?.expiry ?? "2027-06";
+        const es: NewEntry[] = [];
+        let destruction: Destruction | undefined;
+        let approvals = s.approvals;
+        if (disposition === "restock" || disposition === "deal") {
+          addBatch(pp, origBatch, origExpiry, qty, DOCK);
+          if (disposition === "deal") pp.batches.forEach((b) => { if (b.no === origBatch) b.clearance = true; });
+          es.push({ productId: p.id, kind: "return", batch: origBatch, to: DOCK, qty, pcs: qty, ref: r.folio, note: `${c0(s, r.customerId)} · ${r.reason}${disposition === "deal" ? " · short-expiry deal" : ""}` });
+        } else if (disposition === "supplier") {
+          pp.damaged += qty;
+          es.push({ productId: p.id, kind: "damaged", batch: origBatch, qty: 0, pcs: qty, ref: r.folio, note: `Customer return, to supplier · ${c0(s, r.customerId)}` });
+        } else {
+          destruction = { id: uid(), folio: `DS-${800 + s.destructions.length + 1}`, productId: p.id, qtyPcs: qty, reason: `Customer return: ${r.reason}`, source: "return", value: Math.round((p.costPrice / p.packSize) * qty), status: "pending", by, at: Date.now() };
+          approvals = [{ id: uid(), kind: "destruction", refId: destruction.id, text: `Destroy: ${p.name} × ${qty} pcs`, detail: destruction.reason, amount: destruction.value, by, at: Date.now(), status: "pending" }, ...s.approvals];
+          es.push({ productId: p.id, kind: "write-off", batch: origBatch, qty: 0, pcs: qty, ref: r.folio, note: "To be destroyed, waiting for owner approval" });
+        }
         const c = s.customers.find((x) => x.id === r.customerId);
         set({
-          products,
-          ledger: led(s, by, [condition === "good"
-            ? { productId: r.productId, kind: "return", batch: retBatch, to: DOCK, qty: r.qtyPcs, pcs: r.qtyPcs, ref: r.folio, note: `${c0(s, r.customerId)} · ${r.reason}` }
-            : { productId: r.productId, kind: "damaged", batch: retBatch, qty: 0, pcs: r.qtyPcs, ref: r.folio, note: `Customer return, damaged · ${c0(s, r.customerId)}` }]),
-          returns: s.returns.map((x) => (x.id === id ? { ...x, status: "inspected", condition, value } : x)),
-          customers: s.customers.map((x) => (x.id === r.customerId && x.type === "credit" ? { ...x, balance: Math.max(0, x.balance - value) } : x)),
+          products, approvals,
+          destructions: destruction ? [destruction, ...s.destructions] : s.destructions,
+          ledger: led(s, by, es),
+          returns: s.returns.map((x) => (x.id === id ? { ...x, status: "graded", disposition, credit, value, gradedBy: by, gradedAt: Date.now() } : x)),
+          customers: s.customers.map((x) => (x.id === r.customerId && x.type === "credit" && credit ? { ...x, balance: Math.max(0, x.balance - value) } : x)),
           orders: s.orders.map((x) => (x.id === r.orderId ? { ...x, returned: (x.returned ?? 0) + value } : x)),
-          activity: log(s, `${r.folio} inspected by ${by}: ${condition === "good" ? "back to stock" : "to damaged"}. Credit note Rs. ${value.toLocaleString()} for ${c?.name}`),
+          activity: log(s, `${r.folio} graded by ${by}: ${{ restock: "back to stock", deal: "back to stock as a short-expiry deal", supplier: "to the supplier pile", destroy: "to be destroyed" }[disposition]}. ${credit ? `Credit note Rs. ${value.toLocaleString()} for ${c?.name}` : "No credit to the customer"}`),
+        });
+      },
+
+      requestDestruction: (productId, qtyPcs, reason, by) => {
+        const s = get();
+        const p = s.products.find((x) => x.id === productId);
+        if (!p || qtyPcs <= 0 || qtyPcs > p.damaged) return;
+        const d: Destruction = { id: uid(), folio: `DS-${800 + s.destructions.length + 1}`, productId, qtyPcs, reason, source: "damaged", value: Math.round((p.costPrice / p.packSize) * qtyPcs), status: "pending", by, at: Date.now() };
+        set({
+          products: s.products.map((x) => (x.id === productId ? { ...x, damaged: x.damaged - qtyPcs } : x)),
+          destructions: [d, ...s.destructions],
+          approvals: [{ id: uid(), kind: "destruction", refId: d.id, text: `Destroy: ${p.name} × ${qtyPcs} pcs`, detail: reason, amount: d.value, by, at: Date.now(), status: "pending" }, ...s.approvals],
+          ledger: led(s, by, [{ productId, kind: "write-off", batch: "—", from: "Damaged pile", qty: 0, pcs: qtyPcs, ref: d.folio, note: `To be destroyed: ${reason}` }]),
+          activity: log(s, `${by} asked to destroy ${qtyPcs} pcs of ${p.name} (${d.folio}). Waiting for owner approval`),
+        });
+      },
+      completeDestruction: (id, witness, method, by) => {
+        const s = get();
+        const d = s.destructions.find((x) => x.id === id);
+        if (!d || d.status !== "approved") return;
+        const p = s.products.find((x) => x.id === d.productId);
+        set({
+          destructions: s.destructions.map((x) => (x.id === id ? { ...x, status: "done", doneAt: Date.now(), witness, method } : x)),
+          ledger: led(s, by, [{ productId: d.productId, kind: "destroy", batch: "—", qty: 0, pcs: d.qtyPcs, ref: d.folio, note: `${method}, witnessed by ${witness}` }]),
+          activity: log(s, `${d.folio}: ${d.qtyPcs} pcs of ${p?.name} destroyed (${method}, witness ${witness})`),
         });
       },
 
@@ -610,26 +677,58 @@ export const useStore = create<State>()(
         set({ products, ledger: led(s, by, [action === "release" ? { productId, kind: "release", batch: q.no, from: HOLD, to: DOCK, qty: q.qty, pcs: q.qty, ref: "QC", note: "Released from quality hold" } : { productId, kind: "damaged", batch: q.no, from: HOLD, qty: 0, pcs: q.qty, ref: "QC", note: "Rejected from quality hold" }]), activity: log(s, `${by} ${action === "release" ? "released" : "rejected"} ${Math.round(q.qty / p.packSize * 10) / 10} ctn of ${p.name} (batch ${q.no}) from quality hold`) });
       },
 
-      cycleCount: (productId, counted, reason, by) => {
+      applyAdjustment: (a) => {
         const s = get();
-        const p = s.products.find((x) => x.id === productId);
-        if (!p) return;
-        const delta = counted - p.stock;
-        if (delta === 0) return;
-        const value = Math.round(Math.abs(delta) * (p.costPrice / p.packSize));
+        const p = s.products.find((x) => x.id === a.productId)!;
+        const value = Math.round(Math.abs(a.deltaPcs) * (p.costPrice / p.packSize));
         const auto = value <= ADJ_LIMIT;
-        const adj: StockAdj = { id: uid(), productId, deltaPcs: delta, counted, reason, value, status: auto ? "applied" : "pending", by, at: Date.now() };
-        const products = auto ? applyDelta(s.products, productId, delta) : s.products;
+        const adj: StockAdj = { id: uid(), productId: a.productId, deltaPcs: a.deltaPcs, counted: a.counted ?? p.stock + a.deltaPcs, reason: a.reason, code: a.code, bin: a.bin, batch: a.batch, sessionId: a.sessionId, value, status: auto ? "applied" : "pending", by: a.by, at: Date.now() };
+        const issue = a.code === "sample" || a.code === "internal" || a.code === "display";
         set({
-          products,
-          ledger: auto ? led(s, by, [{ productId, kind: "adjustment", batch: "—", qty: delta, pcs: Math.abs(delta), ref: "COUNT", note: `${reason} (counted ${counted})` }]) : s.ledger,
+          products: auto ? applyDelta(s.products, a.productId, a.deltaPcs, a.bin, a.batch) : s.products,
           adjustments: [adj, ...s.adjustments],
-          approvals: auto ? s.approvals : [{
-            id: uid(), kind: "adjustment", refId: adj.id, text: `Stock count: ${p.name}`,
-            detail: `${delta > 0 ? "+" : ""}${Math.round(delta / p.packSize * 10) / 10} ctn variance (${reason})`, amount: value, by, at: Date.now(), status: "pending",
-          }, ...s.approvals],
-          activity: log(s, `${by} counted ${p.name}: ${delta > 0 ? "+" : ""}${delta} pcs ${auto ? "adjusted" : "sent for owner approval"}`),
+          ledger: auto ? led(s, a.by, [{ productId: a.productId, kind: issue ? "issue" : "adjustment", batch: a.batch ?? "—", from: a.deltaPcs < 0 ? a.bin : undefined, to: a.deltaPcs > 0 ? a.bin : undefined, qty: a.deltaPcs, pcs: Math.abs(a.deltaPcs), ref: "ADJ", note: `${ADJ_CODES[a.code]} · ${a.reason}` }]) : s.ledger,
+          approvals: auto ? s.approvals : [{ id: uid(), kind: "adjustment", refId: adj.id, text: `${issue ? "Stock issue" : "Stock adjustment"}: ${p.name}`, detail: `${a.deltaPcs > 0 ? "+" : ""}${Math.round((a.deltaPcs / p.packSize) * 10) / 10} ctn · ${ADJ_CODES[a.code]} · ${a.reason}`, amount: value, by: a.by, at: Date.now(), status: "pending" }, ...s.approvals],
+          activity: log(s, `${a.by}: ${ADJ_CODES[a.code]} on ${p.name} (${a.deltaPcs > 0 ? "+" : ""}${a.deltaPcs} pcs)${auto ? "" : ", sent to the owner"}`),
         });
+        return adj;
+      },
+      issueStock: (productId, pcs, code, note, by) => {
+        const p = get().products.find((x) => x.id === productId);
+        if (!p || pcs <= 0 || pcs > p.stock) return undefined;
+        return get().applyAdjustment({ productId, deltaPcs: -pcs, code, reason: note || ADJ_CODES[code], by });
+      },
+      startCount: (productIds, mode, by) => {
+        const s = get();
+        const list = (productIds === "all" ? s.products : s.products.filter((p) => productIds.includes(p.id))).filter((p) => p.batches.some((b) => b.qty > 0));
+        const lines: CountLine[] = list.flatMap((p) => p.batches.filter((b) => b.qty > 0).map((b) => ({ productId: p.id, bin: b.bin, batch: b.no, expiry: b.expiry, systemPcs: b.qty })));
+        const id = `c${uid()}`;
+        set({
+          counts: [{ id, folio: `CNT-${300 + s.counts.length + 1}`, mode, status: "counting", createdAt: Date.now(), by, lines }, ...s.counts],
+          activity: log(s, `${by} started a ${mode === "full" ? "full stock take" : "count"} (${list.length} product${list.length === 1 ? "" : "s"}, ${lines.length} lines)`),
+        });
+        return id;
+      },
+      setCountLine: (sessionId, idx, patch) => set((s) => ({ counts: s.counts.map((c) => (c.id === sessionId ? { ...c, lines: c.lines.map((l, i) => (i === idx ? { ...l, ...patch } : l)) } : c)) })),
+      submitCount: (sessionId) => set((s) => ({ counts: s.counts.map((c) => (c.id === sessionId ? { ...c, status: "review" } : c)) })),
+      discardCount: (sessionId) => set((s) => ({ counts: s.counts.map((c) => (c.id === sessionId ? { ...c, status: "cancelled" } : c)), activity: log(s, `A count was cancelled`) })),
+      postCount: (sessionId, by) => {
+        const c = get().counts.find((x) => x.id === sessionId);
+        if (!c || c.status !== "review") return { applied: 0, pending: 0 };
+        let applied = 0, pending = 0;
+        for (const l of c.lines) {
+          const d = lineDelta(l);
+          if (d === 0) continue;
+          const adj = get().applyAdjustment({ productId: l.productId, deltaPcs: d, code: l.code ?? "miscount", reason: `Count ${c.folio}`, by, bin: l.bin, batch: l.batch, sessionId, counted: (l.recount ?? l.counted) });
+          if (adj.status === "pending") pending++; else applied++;
+        }
+        const ids = new Set(c.lines.map((l) => l.productId));
+        set((s) => ({
+          counts: s.counts.map((x) => (x.id === sessionId ? { ...x, status: "posted", postedAt: Date.now() } : x)),
+          products: s.products.map((p) => (ids.has(p.id) ? { ...p, lastCount: Date.now() } : p)),
+          activity: log(s, `${by} posted ${c.folio}: ${applied} adjustment${applied === 1 ? "" : "s"} applied${pending ? `, ${pending} sent to the owner` : ""}`),
+        }));
+        return { applied, pending };
       },
 
       approveRequest: (id, by) => {
@@ -644,9 +743,14 @@ export const useStore = create<State>()(
             products: st.products.map((p) => { const c = ch.find((x) => x.productId === p.id); return c ? { ...p, cartonPrice: c.newPrice } : p; }),
             priceHistory: st.priceHistory.map((c) => (c.batchId === a.refId && c.status === "pending" ? { ...c, status: "applied" } : c)),
           });
+        } else if (a.kind === "destruction") {
+          set({ destructions: get().destructions.map((d) => (d.id === a.refId ? { ...d, status: "approved" } : d)) });
         } else {
           const adj = s.adjustments.find((x) => x.id === a.refId);
-          if (adj) set({ products: applyDelta(get().products, adj.productId, adj.deltaPcs), ledger: led(get(), by, [{ productId: adj.productId, kind: "adjustment", batch: "—", qty: adj.deltaPcs, pcs: Math.abs(adj.deltaPcs), ref: "COUNT", note: `${adj.reason} (owner approved)` }]), adjustments: get().adjustments.map((x) => (x.id === adj.id ? { ...x, status: "applied" } : x)) });
+          if (adj) {
+            const issue = adj.code === "sample" || adj.code === "internal" || adj.code === "display";
+            set({ products: applyDelta(get().products, adj.productId, adj.deltaPcs, adj.bin, adj.batch), ledger: led(get(), by, [{ productId: adj.productId, kind: issue ? "issue" : "adjustment", batch: adj.batch ?? "—", qty: adj.deltaPcs, pcs: Math.abs(adj.deltaPcs), ref: "ADJ", note: `${adj.code ? ADJ_CODES[adj.code] + " · " : ""}${adj.reason} (owner approved)` }]), adjustments: get().adjustments.map((x) => (x.id === adj.id ? { ...x, status: "applied" } : x)) });
+          }
         }
         set((st) => ({ approvals: st.approvals.map((x) => (x.id === id ? { ...x, status: "approved" } : x)), activity: log(st, `Owner approved ${a.text}`) }));
       },
@@ -656,6 +760,13 @@ export const useStore = create<State>()(
         if (!a || a.status !== "pending") return;
         if (a.kind === "order") get().cancelOrder(a.refId, by);
         else if (a.kind === "price") set({ priceHistory: s.priceHistory.map((c) => (c.batchId === a.refId && c.status === "pending" ? { ...c, status: "rejected" } : c)) });
+        else if (a.kind === "destruction") {
+          const d = s.destructions.find((x) => x.id === a.refId);
+          set({
+            destructions: s.destructions.map((x) => (x.id === a.refId ? { ...x, status: "rejected" } : x)),
+            products: d ? s.products.map((p) => (p.id === d.productId ? { ...p, damaged: p.damaged + d.qtyPcs } : p)) : s.products,
+          });
+        }
         else set({ adjustments: s.adjustments.map((x) => (x.id === a.refId ? { ...x, status: "rejected" } : x)) });
         set((st) => ({ approvals: st.approvals.map((x) => (x.id === id ? { ...x, status: "rejected" } : x)), activity: log(st, `Owner rejected ${a.text}`) }));
       },
@@ -910,8 +1021,8 @@ export const useStore = create<State>()(
       setBookerTarget: (id, target) => set((s) => ({ users: s.users.map((u) => (u.id === id ? { ...u, target } : u)) })),
     }),
     {
-      name: "zarie-dms-v9",
-      version: 9,
+      name: "zarie-dms-v10",
+      version: 10,
       // The signed-in user belongs to this tab only; the business data is shared by every tab.
       partialize: (s) => Object.fromEntries(Object.entries(s).filter(([k]) => k !== "userId")) as unknown as State,
     }
@@ -922,9 +1033,21 @@ function withShort(l: Line, ordered: number, reason?: string): Line {
   return l.qty < ordered ? { ...l, shortReason: reason || "Not enough on shelf" } : l;
 }
 
-function applyDelta(products: Product[], productId: string, delta: number) {
+function applyDelta(products: Product[], productId: string, delta: number, bin?: string, batch?: string) {
   const ps = cloneP(products);
   const p = ps.find((x) => x.id === productId)!;
+  if (bin && batch) {
+    const row = p.batches.find((b) => b.no === batch && b.bin === bin);
+    if (delta > 0) { addBatch(p, batch, row?.expiry ?? p.batches.find((b) => b.no === batch)?.expiry ?? "2027-12", delta, bin); return ps; }
+    if (row) {
+      const take = Math.min(row.qty, -delta);
+      row.qty -= take;
+      p.batches = p.batches.filter((b) => b.qty > 0);
+      p.stock = p.batches.reduce((s, b) => s + b.qty, 0);
+      if (-delta > take) fefo(p, -delta - take);
+      return ps;
+    }
+  }
   if (delta > 0) {
     const last = [...p.batches].sort((a, b) => b.expiry.localeCompare(a.expiry))[0];
     addBatch(p, last?.no ?? "ADJ", last?.expiry ?? "2027-12", delta, last?.bin ?? DOCK);
@@ -952,6 +1075,6 @@ export type { Role };
 // Keep open tabs in step: when another tab changes the data, pick it up straight away.
 if (typeof window !== "undefined") {
   window.addEventListener("storage", (e) => {
-    if (e.key === "zarie-dms-v9") useStore.persist.rehydrate();
+    if (e.key === "zarie-dms-v10") useStore.persist.rehydrate();
   });
 }

@@ -45,6 +45,7 @@ export interface Product {
   leadDays: number; // supplier lead time
   bin: string; // rack location
   hue: number;
+  lastCount?: number; // when this product was last counted
 }
 
 export interface Customer {
@@ -206,23 +207,33 @@ export interface Payment {
 }
 
 export type ReturnReason = "damaged" | "expired" | "wrong item" | "old packaging" | "refused";
+export type Disposition = "restock" | "deal" | "supplier" | "destroy";
 export interface ReturnNote {
   id: string;
   folio: string;
   orderId: string;
   customerId: string;
   productId: string;
-  qtyPcs: number;
+  qtyPcs: number; // reported by the person who collected it
   reason: ReturnReason;
-  status: "pending" | "inspected";
-  condition?: "good" | "damaged";
-  value?: number;
+  status: "pending" | "received" | "graded"; // reported -> arrived at the dock -> graded
   by: string;
   at: number;
+  receivedQty?: number; // what actually arrived
+  receivedAt?: number;
+  receivedBy?: string;
+  intakeNote?: string;
+  photo?: string;
+  disposition?: Disposition;
+  credit?: boolean; // credit note issued to the customer
+  value?: number;
+  gradedBy?: string;
+  gradedAt?: number;
 }
 
 export interface SupplierReturn {
   id: string;
+  gatePass?: string;
   folio: string;
   supplier: string;
   productId: string;
@@ -232,12 +243,28 @@ export interface SupplierReturn {
   at: number;
 }
 
+export type AdjCode = "miscount" | "damage" | "theft" | "found" | "wrong-receipt" | "unit-error" | "sample" | "internal" | "display";
+export const ADJ_CODES: Record<AdjCode, string> = {
+  miscount: "Miscount, recount",
+  damage: "Damage found",
+  theft: "Theft or loss",
+  found: "Found stock",
+  "wrong-receipt": "Wrong receipt or picking error",
+  "unit-error": "Unit or pack-size error",
+  sample: "Sample to customer",
+  internal: "Internal use",
+  display: "Marketing display",
+};
 export interface StockAdj {
   id: string;
   productId: string;
   deltaPcs: number;
   counted: number;
   reason: string;
+  code?: AdjCode;
+  bin?: string;
+  batch?: string;
+  sessionId?: string;
   value: number;
   status: "applied" | "pending" | "rejected";
   by: string;
@@ -246,7 +273,7 @@ export interface StockAdj {
 
 export interface Approval {
   id: string;
-  kind: "order" | "adjustment" | "price";
+  kind: "order" | "adjustment" | "price" | "destruction";
   refId: string;
   text: string;
   detail: string;
@@ -339,7 +366,7 @@ export interface StockMove {
   reason: string;
 }
 
-export type EntryKind = "receipt" | "pick" | "return" | "adjustment" | "transfer" | "putaway" | "hold" | "release" | "damaged" | "supplier-return" | "write-off" | "recall";
+export type EntryKind = "receipt" | "pick" | "return" | "adjustment" | "transfer" | "putaway" | "hold" | "release" | "damaged" | "supplier-return" | "write-off" | "recall" | "issue" | "destroy";
 export interface StockEntry {
   id: string;
   at: number;
@@ -354,4 +381,41 @@ export interface StockEntry {
   ref: string; // GRN, challan, return, count reference
   note?: string;
   orderId?: string;
+}
+
+export interface Destruction {
+  id: string;
+  folio: string;
+  productId: string;
+  qtyPcs: number;
+  reason: string;
+  source: "return" | "damaged";
+  value: number; // at cost
+  status: "pending" | "approved" | "rejected" | "done";
+  by: string;
+  at: number;
+  doneAt?: number;
+  witness?: string;
+  method?: string;
+}
+
+export interface CountLine {
+  productId: string;
+  bin: string;
+  batch: string;
+  expiry: string;
+  systemPcs: number; // snapshot when the count started, hidden from the counter
+  counted?: number; // pieces
+  recount?: number;
+  code?: AdjCode;
+}
+export interface CountSession {
+  id: string;
+  folio: string;
+  mode: "cycle" | "full";
+  status: "counting" | "review" | "posted" | "cancelled";
+  createdAt: number;
+  by: string;
+  lines: CountLine[];
+  postedAt?: number;
 }

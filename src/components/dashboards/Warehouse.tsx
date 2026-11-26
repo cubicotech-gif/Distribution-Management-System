@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useStore } from "@/lib/store";
 import { available, monthsLeft, pcsOf } from "@/lib/calc";
 import { DOCK, binUsed, replenishments } from "@/lib/locations";
+import { abcClasses, dueInfo } from "@/lib/counts";
 import { Card, Row, Tile } from "../dash";
 
 export default function Warehouse() {
@@ -27,9 +28,12 @@ export default function Warehouse() {
   const held = products.reduce((s, p) => s + p.quarantine.reduce((a, q) => a + q.qty / p.packSize, 0), 0);
   const toPack = orders.filter((o) => o.status === "picked" && !o.packed);
   const heldPicks = orders.filter((o) => o.status === "approved" && o.pickHold);
+  const cl = abcClasses(products);
+  const countsDue = products.filter((p) => p.status !== "unlisted" && p.batches.some((b) => b.qty > 0) && dueInfo(p, cl[p.id]).due).length;
+  const openCounts = useStore((s) => s.counts).filter((c) => c.status === "counting" || c.status === "review").length;
   const dispatch = orders.filter((o) => o.status === "invoiced" && !o.tripId);
   const loading = trips.filter((t) => t.status === "loading");
-  const rets = returns.filter((r) => r.status === "pending");
+  const rets = returns.filter((r) => r.status !== "graded");
   const damaged = products.filter((p) => p.damaged > 0);
   const near = products.flatMap((p) => p.batches.filter((b) => monthsLeft(b.expiry) <= 2).map((b) => ({ p, b })));
   const low = products.filter((p) => available(p) < p.reorder);
@@ -37,12 +41,13 @@ export default function Warehouse() {
   return (
     <div className="mx-auto flex max-w-[1100px] flex-col gap-4">
       <div><h1 className="text-[22px] font-bold">Warehouse floor</h1><p className="text-ink2">Today&apos;s physical work: receive, pick, load, inspect returns.</p></div>
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-5 gap-3">
         <Tile label="Trucks due" value={inbound.length} sub={late.length ? `${late.length} late. ${counting.length} being counted` : `${counting.length} being counted`} href="/receiving" tone={late.length ? "warn" : undefined} />
         <Tile label="To put away" value={dock.length} sub={full || repl ? `${full ? full + " bins over capacity. " : ""}${repl ? repl + " pick faces to refill" : ""}` : "Batches at the dock"} href="/putaway" tone={dock.length ? "warn" : undefined} />
         <Tile label="Orders to pick" value={toPick.length} sub={heldPicks.length ? `${heldPicks.length} on hold` : `${Math.round(cartons)} cartons`} href="/pick" tone={toPick.length ? "ok" : undefined} />
         <Tile label="To pack and check" value={toPack.length} sub={toPack.length ? "Picked, waiting for the packing check" : "Packing table is clear"} href="/pack" tone={toPack.length ? "warn" : undefined} />
         <Tile label="Invoices to load" value={dispatch.length} sub={`${loading.length} load sheets open`} href="/dispatch" />
+        <Tile label="Counts due" value={countsDue} sub={openCounts ? `${openCounts} count in progress` : "By ABC schedule"} href="/counts" tone={countsDue ? "warn" : undefined} />
         <Tile label="Returns to inspect" value={rets.length} sub="Decide good or damaged" href="/returns" tone={rets.length ? "warn" : undefined} />
         <Tile label="Damaged / on hold" value={`${Math.round(damaged.reduce((s, p) => s + p.damaged / p.packSize, 0) * 10) / 10} / ${Math.round(held * 10) / 10}`} sub="Cartons: damaged · quality hold" href="/receiving" />
       </div>

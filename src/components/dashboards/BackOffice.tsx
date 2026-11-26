@@ -24,7 +24,7 @@ export default function BackOffice() {
   const mid = new Date(); mid.setHours(0, 0, 0, 0);
   const collected = payments.filter((p) => p.at >= mid.getTime()).reduce((s, p) => s + p.amount, 0);
   const chase = customers.map((c) => ({ c, o: overdueAmount(orders, c) })).filter((x) => x.o > 0).sort((a, b) => b.o - a.o).slice(0, 5);
-  const pendingCN = returns.filter((r) => r.status === "pending").length;
+  const pendingCN = returns.filter((r) => r.status !== "graded").length;
   const unlisted = products.filter((p) => p.status === "unlisted");
   const arrived = unlisted.filter((p) => p.stock > 0);
 

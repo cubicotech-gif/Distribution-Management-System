@@ -95,6 +95,12 @@ export const BINS: Bin[] = buildBins();
   }
 })();
 
+// When each product was last counted (drives the ABC count schedule).
+(function stampCounts() {
+  const days: Record<string, number> = { p1: 3, p2: 10, p3: 40, p4: 2, p5: 35, p6: 5, p7: 12, p8: 80, p9: 20, p10: 95, p11: 30, p12: 100 };
+  for (const p of PRODUCTS) if (days[p.id] !== undefined) p.lastCount = Date.now() - days[p.id] * 86400000;
+})();
+
 // How long ago each batch arrived (gives the ageing report something real to show).
 (function stampBatches() {
   PRODUCTS.forEach((p, pi) => {
@@ -221,6 +227,7 @@ export const TRIPS: Trip[] = [
 
 export const RETURNS: ReturnNote[] = [
   { id: "r1", folio: "RT-501", orderId: "o35", customerId: "c9", productId: "p2", qtyPcs: 36, reason: "old packaging", status: "pending", by: "BR", at: now - 2 * h },
+  { id: "r2", folio: "RT-500", orderId: "o34", customerId: "c8", productId: "p7", qtyPcs: 12, reason: "damaged", status: "received", by: "BR", at: now - 5 * h, receivedQty: 12, receivedAt: now - 1 * h, receivedBy: "IA", intakeNote: "Cartons wet at the bottom, contents spoiled" },
 ];
 
 // Sales of the previous 13 days (Rs.), used by the owner's trend chart

@@ -169,7 +169,7 @@ export function ledger(c: Customer, orders: Order[], payments: Payment[], return
     rows.push({ at: invoiceDate(o), ref: o.invoiceNo ?? o.folio, text: `Invoice · ${o.folio}`, debit: orderTotal(o), credit: 0 });
   }
   for (const p of payments) if (p.customerId === c.id && c.type === "credit") rows.push({ at: p.at, ref: "RCPT", text: `Payment (${p.mode})`, debit: 0, credit: p.amount });
-  for (const r of returns) if (r.customerId === c.id && r.status === "inspected" && c.type === "credit") rows.push({ at: r.at, ref: r.folio, text: "Credit note (return)", debit: 0, credit: r.value ?? 0 });
+  for (const r of returns) if (r.customerId === c.id && r.status === "graded" && r.credit && c.type === "credit") rows.push({ at: r.gradedAt ?? r.at, ref: r.folio, text: "Credit note (return)", debit: 0, credit: r.value ?? 0 });
   rows.sort((a, b) => a.at - b.at);
   const net = rows.reduce((s, r) => s + r.debit - r.credit, 0);
   let bal = c.balance - net;

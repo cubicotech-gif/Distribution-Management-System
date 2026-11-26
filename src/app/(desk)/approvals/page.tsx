@@ -26,7 +26,7 @@ export default function Approvals() {
           return (
             <div key={a.id} className="flex items-center gap-4 border-b border-line px-4 py-3.5 last:border-0">
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2"><span className="font-semibold">{a.text}</span><span className="chip chip-mute">{a.kind === "order" ? "Order" : a.kind === "price" ? "Price change" : "Stock count"}</span></div>
+                <div className="flex items-center gap-2"><span className="font-semibold">{a.text}</span><span className="chip chip-mute">{a.kind === "order" ? "Order" : a.kind === "price" ? "Price change" : a.kind === "destruction" ? "Destruction" : "Stock adjustment"}</span></div>
                 <div className="mt-0.5 text-xs text-[var(--warn-fg)]">{a.detail}</div>
                 <div className="mt-0.5 text-[11px] text-ink3">Requested by {a.by} · {ago(a.at)}{c && c.type === "credit" && <> · balance Rs. {fmt(c.balance)} of {fmt(c.creditLimit)}</>}</div>
               </div>

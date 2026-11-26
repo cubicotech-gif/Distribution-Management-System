@@ -26,7 +26,7 @@ export default function Settlements() {
         const expected = t.status === "closed" ? t.expectedCash ?? 0 : payments.filter((p) => p.tripId === t.id && p.mode === "cash").reduce((a, p) => a + p.amount, 0);
         const cnt = counted[t.id] ?? expected;
         const diff = cnt - expected;
-        const rets = returns.filter((r) => os.some((o) => o.id === r.orderId) && r.status === "pending").length;
+        const rets = returns.filter((r) => os.some((o) => o.id === r.orderId) && r.status !== "graded").length;
         return (
           <div key={t.id} className="panel">
             <div className="flex items-center justify-between border-b border-line px-4 py-3">

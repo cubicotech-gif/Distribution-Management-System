@@ -1,6 +1,6 @@
 "use client";
 import { Suspense, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import LedgerTab from "@/components/stock/LedgerTab";
 import ExpiryTab from "@/components/stock/ExpiryTab";
 import TraceTab from "@/components/stock/TraceTab";
@@ -9,14 +9,15 @@ import { statusSplit } from "@/lib/stockctl";
 import { ChevronRight } from "lucide-react";
 import { useStore, useUser } from "@/lib/store";
 import { available, coverDays, fmt, monthsLeft } from "@/lib/calc";
-import { Chips, Modal, Thumb, ViewSwitch, toast, useViewMode } from "@/components/ui";
+import { Chips, Thumb, ViewSwitch, toast, useViewMode } from "@/components/ui";
 import type { Product } from "@/lib/types";
 
 function StockTab({ onLedger, onTrace }: { onLedger: (productId: string) => void; onTrace: (productId: string, batch: string) => void }) {
   const params = useSearchParams();
   const products = useStore((s) => s.products);
   const adjustments = useStore((s) => s.adjustments);
-  const count = useStore((s) => s.cycleCount);
+  const startCount = useStore((s) => s.startCount);
+  const router = useRouter();
   const user = useUser();
   const role = user?.role;
   const canCount = role === "warehouse";
@@ -26,10 +27,7 @@ function StockTab({ onLedger, onTrace }: { onLedger: (productId: string) => void
   const [cat, setCat] = useState("all");
   const [flt, setFlt] = useState<"all" | "low" | "expiry" | "damaged">("all");
   const [open, setOpen] = useState<string | null>(null);
-  const [cnt, setCnt] = useState<Product | null>(null);
-  const [ctn, setCtn] = useState(0);
-  const [loose, setLoose] = useState(0);
-  const [reason, setReason] = useState("Routine cycle count");
+  const goCount = (id: string) => { startCount([id], "cycle", user?.initials ?? "—"); router.push("/counts?tab=sessions"); };
   const categories = Array.from(new Set(products.map((p) => p.category))).sort();
   const rows = products
     .filter((p) => (p.name + p.code + p.brand + p.bin).toLowerCase().includes(q.toLowerCase()))
@@ -68,7 +66,7 @@ function StockTab({ onLedger, onTrace }: { onLedger: (productId: string) => void
               <div className="num text-[11px] text-ink3">{p.code} · rack {p.bin || "—"}</div>
               <div className="flex flex-wrap gap-1"><span className="chip chip-mute">{p.category}</span>{p.damaged > 0 && <span className="chip chip-bad">{Math.round(p.damaged / p.packSize * 10) / 10} damaged</span>}{m && monthsLeft(m.expiry) <= 2 && <span className="chip chip-warn">exp {m.expiry}</span>}</div>
               <div className="mt-auto flex items-center justify-between text-[11px] text-ink2"><span>On hand <b className="num">{fmt(p.stock / p.packSize)}</b></span><span>Cover <b className="num">{coverDays(p).toFixed(0)}d</b></span></div>
-              {canCount && <button className="btn h-7 justify-center" onClick={() => { setCnt(p); setCtn(0); setLoose(0); }}>Count</button>}
+              {canCount && <button className="btn h-7 justify-center" onClick={() => goCount(p.id)}>Count</button>}
             </div>); })}
         </div>
       )}
@@ -79,7 +77,7 @@ function StockTab({ onLedger, onTrace }: { onLedger: (productId: string) => void
               <Thumb p={p} size={22} /><span className="num w-14 text-ink3">{p.bin}</span><span className="min-w-0 flex-1 truncate font-medium">{p.name}</span>
               <span className="hidden w-44 truncate text-ink3 md:block">{p.category}</span><span className="num w-16 text-right">{fmt(p.stock / p.packSize)}</span>
               <span className={`chip num w-16 justify-center ${a < p.reorder ? "chip-warn" : "chip-ok"}`}>{fmt(a / p.packSize)}</span>
-              {canCount && <button className="btn h-7" onClick={() => { setCnt(p); setCtn(0); setLoose(0); }}>Count</button>}
+              {canCount && <button className="btn h-7" onClick={() => goCount(p.id)}>Count</button>}
             </div>); })}
         </div>
       )}
@@ -104,7 +102,7 @@ function StockTab({ onLedger, onTrace }: { onLedger: (productId: string) => void
                     <td className="num text-right text-ink2">{d.toFixed(0)}d</td>
                     {showCost && <td className="num text-right text-ink2">{fmt(p.costPrice)}</td>}
                     {showCost && <td className="num text-right">{fmt((p.stock / p.packSize) * p.costPrice)}</td>}
-                    {canCount && <td className="pr-3 text-right" onClick={(e) => e.stopPropagation()}><button className="btn h-7" onClick={() => { setCnt(p); setCtn(0); setLoose(0); }}>Count</button></td>}
+                    {canCount && <td className="pr-3 text-right" onClick={(e) => e.stopPropagation()}><button className="btn h-7" onClick={() => goCount(p.id)}>Count</button></td>}
                   </tr>
                   {open === p.id && (
                     <tr key={p.id + "b"} className="bg-panel2"><td /><td colSpan={9} className="px-2 py-2.5">
@@ -123,28 +121,6 @@ function StockTab({ onLedger, onTrace }: { onLedger: (productId: string) => void
           </tbody>
         </table>
       </div>
-      {cnt && (
-        <Modal open onClose={() => setCnt(null)} title={`Blind count · ${cnt.name}`} width={440}>
-          <div className="space-y-3">
-            <div className="text-xs text-ink2">Rack <b className="num">{cnt.bin}</b>. Count what is physically there. The system quantity is hidden so the count stays honest.</div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><div className="th mb-1">Full cartons</div><input className="field num text-[16px] font-semibold" type="number" min={0} autoFocus value={ctn} onChange={(e) => setCtn(Math.max(0, +e.target.value))} /></div>
-              <div><div className="th mb-1">Loose pieces</div><input className="field num text-[16px] font-semibold" type="number" min={0} value={loose} onChange={(e) => setLoose(Math.max(0, +e.target.value))} /></div>
-            </div>
-            <select className="field" value={reason} onChange={(e) => setReason(e.target.value)}>{["Routine cycle count", "Suspected shortage", "Found extra stock", "After damage check"].map((r) => <option key={r}>{r}</option>)}</select>
-            <div className="flex justify-end gap-2">
-              <button className="btn" onClick={() => setCnt(null)}>Cancel</button>
-              <button className="btn btn-primary" onClick={() => {
-                const counted = ctn * cnt.packSize + loose;
-                const diff = counted - cnt.stock;
-                count(cnt.id, counted, reason, user?.initials ?? "—");
-                toast(diff === 0 ? "Count matches the system" : `Variance ${diff > 0 ? "+" : ""}${diff} pcs recorded`);
-                setCnt(null);
-              }}>Submit count</button>
-            </div>
-          </div>
-        </Modal>
-      )}
     </div>
   );
 }

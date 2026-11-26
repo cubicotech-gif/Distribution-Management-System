@@ -108,18 +108,19 @@ Built department by department. Nothing moves to the next department until the c
 - ⬜ Substitute batch when the FEFO batch is damaged or missing (picker can only short-pick today)
 
 ### B6. Returns
-- 🟡 Inspect good / damaged
-- ⬜ Return intake with reference to the invoice, reason, photo
-- ⬜ Grading: restock, near-expiry (discount sale), damaged (supplier return), destroy
-- ⬜ Destruction record with owner approval
-- ⬜ Return to supplier gate pass
+- ✅ Return intake at the dock: count what actually arrived (more than reported is blocked, fewer is flagged and credited for the received quantity), photo, condition note, invoice reference shown
+- ✅ Grading: back to stock (into the original batch), back to stock as a short-expiry deal, to the supplier pile, or destroy; suggestion from the reason and the batch's shelf life; credit note can be switched off when the customer is at fault
+- ✅ Destruction record: owner approval, then witnessed record with method, then printable certificate. If the owner rejects, the goods go back to the damaged pile. Damaged stock can also be put forward for destruction
+- ✅ Return to supplier: printable debit note and gate pass with vehicle and driver
 
 ### B7. Inventory control
-- 🟡 Blind cycle count with owner approval over a value limit
-- ⬜ Count schedule by ABC class; printable count sheets; recount when variance is high
-- ⬜ Adjustment reason codes (damage, theft, found, wrong receipt) with reports
-- ⬜ Internal consumption / sample issue
-- ⬜ Full stock take mode
+- ✅ Count sessions per bin and batch, blind (system quantity hidden), submit, then review with variances revealed
+- ✅ Recount required when a variance is worth over Rs. 5,000 or over 10% of the system quantity; every difference needs a reason code before posting
+- ✅ ABC count schedule (A weekly, B monthly, C quarterly) with overdue and due flags; start a count from the schedule or from a product on the Stock page; printable blind count sheets
+- ✅ Full stock take mode with zone filter
+- ✅ Adjustment reason codes (miscount, damage, theft or loss, found stock, wrong receipt or picking error, unit error) with an adjustments report by reason; differences over Rs. 20,000 go to the owner
+- ✅ Internal consumption: issue stock as a sample, internal use or marketing display; large issues need owner approval
+- ⬜ Second counter must be a different person (the system does not track who recounted)
 
 ### B8. Warehouse reports
 - ⬜ Stock summary, movement, expiry, ageing, GRN register, dispatch register, pick accuracy, count variances, returns, damaged stock value (no prices shown to warehouse staff; quantities only)

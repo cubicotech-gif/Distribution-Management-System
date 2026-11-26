@@ -4,14 +4,15 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ClipboardList, FileText, Truck, Boxes, Users, Wallet, PackageCheck, LayoutGrid, Package, Search,
-  Moon, Sun, LogOut, Command, RotateCcw, Plus, ArrowRight, ShieldCheck, BarChart3, UserCog, Landmark, Route, Undo2, Gauge, MapPinned, Building2, History, MapPin, ArrowDownToLine, PackageOpen,
+  Moon, Sun, LogOut, Command, RotateCcw, Plus, ArrowRight, ShieldCheck, BarChart3, UserCog, Landmark, Route, Undo2, Gauge, MapPinned, Building2, History, MapPin, ArrowDownToLine, PackageOpen, ClipboardCheck,
 } from "lucide-react";
 import { HOME, useStore, useUser } from "@/lib/store";
 import type { Role } from "@/lib/types";
 import { Avatar, ConfirmHost, Kbd, Modal, Toaster, ask, useHydrated, toast } from "./ui";
 import SkeletonPage from "./Skeleton";
+import { abcClasses, dueInfo } from "@/lib/counts";
 
-type Badge = "pack" | "putaway" | "orders" | "pick" | "invoice" | "receive" | "approvals" | "returns" | "dispatch" | "settle" | "plan";
+type Badge = "counts" | "pack" | "putaway" | "orders" | "pick" | "invoice" | "receive" | "approvals" | "returns" | "dispatch" | "settle" | "plan";
 type Nav = { href: string; label: string; icon: React.ComponentType<{ size?: number }>; roles: Role[]; badge?: Badge };
 const NAV: Nav[] = [
   { href: "/dashboard", label: "Today", icon: LayoutGrid, roles: ["admin", "sales", "purchasing", "warehouse"] },
@@ -36,6 +37,7 @@ const NAV: Nav[] = [
   { href: "/dispatch", label: "Dispatch", icon: Route, roles: ["warehouse"], badge: "dispatch" },
   { href: "/returns", label: "Returns", icon: Undo2, roles: ["warehouse"], badge: "returns" },
   { href: "/locations", label: "Locations", icon: MapPin, roles: ["warehouse", "admin"] },
+  { href: "/counts", label: "Counts", icon: ClipboardCheck, roles: ["warehouse", "admin"], badge: "counts" },
   // Purchasing
   { href: "/planner", label: "Reorder planner", icon: Gauge, roles: ["purchasing"], badge: "plan" },
   { href: "/receiving", label: "Orders & GRN", icon: PackageCheck, roles: ["purchasing"], badge: "receive" },
@@ -117,6 +119,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const trips = useStore((s) => s.trips);
   const approvals = useStore((s) => s.approvals);
   const grnsAll = useStore((s) => s.grns);
+  const countSessions = useStore((s) => s.counts);
   const products = useStore((s) => s.products);
   useEffect(() => {
     const label = NAV.find((n) => path.startsWith(n.href))?.label;
@@ -129,22 +132,23 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     pick: orders.filter((o) => o.status === "approved").length,
     invoice: orders.filter((o) => o.status === "picked" && o.packed).length,
     pack: orders.filter((o) => o.status === "picked" && !o.packed).length,
+    counts: (() => { const cl = abcClasses(products); return products.filter((p) => p.status !== "unlisted" && p.batches.some((b) => b.qty > 0) && dueInfo(p, cl[p.id]).due).length + countSessions.filter((c) => c.status === "counting" || c.status === "review").length; })(),
     receive: user?.role === "purchasing"
       ? grnsAll.filter((g) => g.status === "counted").length + purchases.filter((p) => (p.status === "ordered" || p.status === "partial") && p.expectedAt < Date.now() - 12 * 3600000).length
       : purchases.filter((p) => (p.status === "ordered" || p.status === "partial") && p.expectedAt < new Date().setHours(23, 59, 59, 999)).length + grnsAll.filter((g) => g.status === "counting").length,
     approvals: approvals.filter((a) => a.status === "pending").length,
-    returns: returns.filter((r) => r.status === "pending").length,
+    returns: returns.filter((r) => r.status !== "graded").length,
     dispatch: orders.filter((o) => o.status === "invoiced" && !o.tripId).length + trips.filter((t) => t.status === "loading").length,
     settle: trips.filter((t) => t.status === "out" && t.orderIds.every((id) => orders.find((o) => o.id === id)?.status !== "invoiced")).length,
     plan: products.filter((p) => p.stock - p.reserved < p.reorder).length,
-  }), [orders, purchases, returns, trips, approvals, products, grnsAll, user?.role]);
+  }), [orders, purchases, returns, trips, approvals, products, grnsAll, countSessions, user?.role]);
 
   if (!hydrated || !user || ["booker", "delivery", "recovery"].includes(user.role)) {
     return <div className="grid h-screen place-items-center text-ink3">Loading…</div>;
   }
   const nav = NAV.filter((n) => n.roles.includes(user.role));
   const current = nav.find((n) => path.startsWith(n.href));
-  const kind = path.startsWith("/dashboard") ? "tiles" : ["/orders", "/pick", "/receiving", "/dispatch", "/returns", "/settlements", "/approvals", "/putaway", "/pack"].some((x) => path.startsWith(x)) ? "split" : "table";
+  const kind = path.startsWith("/dashboard") ? "tiles" : ["/orders", "/pick", "/receiving", "/dispatch", "/returns", "/settlements", "/approvals", "/putaway", "/pack", "/counts"].some((x) => path.startsWith(x)) ? "split" : "table";
 
   return (
     <div className="flex h-screen overflow-hidden">
