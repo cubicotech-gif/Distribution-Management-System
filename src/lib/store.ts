@@ -100,6 +100,7 @@ interface State {
   updateOrderLines: (id: string, lines: Line[]) => void;
   approveOrder: (id: string, by: string, ownerOverride?: boolean) => { ok: boolean; reasons?: string[] };
   holdOrder: (id: string, by: string) => void;
+  restoreOrder: (id: string, status: OrderStatus, by: string) => void;
   cancelOrder: (id: string, by: string) => void;
   pickOrder: (id: string, picked: Record<number, number>, reasons: Record<number, string>, by: string) => void;
   invoiceOrder: (id: string, by: string) => void;
@@ -240,6 +241,9 @@ export const useStore = create<State>()(
         });
         return { ok: true };
       },
+
+      restoreOrder: (id, status, by) =>
+        set((s) => ({ orders: s.orders.map((o) => (o.id === id ? { ...o, status, needsOwner: undefined, trail: stamp(o, status, by) } : o)) })),
 
       holdOrder: (id, by) =>
         set((s) => ({ orders: s.orders.map((o) => (o.id === id ? { ...o, status: "hold", trail: stamp(o, "hold", by) } : o)) })),

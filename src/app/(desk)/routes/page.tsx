@@ -3,7 +3,7 @@ import { useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { useStore, useUser } from "@/lib/store";
 import { fmt } from "@/lib/calc";
-import { Avatar, toast } from "@/components/ui";
+import { Avatar, ask, toast } from "@/components/ui";
 import type { Route } from "@/lib/types";
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -50,7 +50,7 @@ export default function Routes() {
                 {cs.length > 5 && <div className="px-3 py-1.5 text-[11px] text-ink3">+ {cs.length - 5} more. Move customers from the Customers page.</div>}
                 {cs.length === 0 && <div className="px-3 py-3 text-xs text-ink3">No customers on this route yet.</div>}
               </div>
-              {canEdit && cs.length === 0 && <button className="btn btn-danger self-start" onClick={() => { del(r.id); toast("Route deleted"); }}><Trash2 size={13} /> Delete route</button>}
+              {canEdit && cs.length === 0 && <button className="btn btn-danger self-start" onClick={async () => { if (await ask({ title: `Delete route ${r.name}?`, body: "It has no customers.", confirm: "Delete", danger: true })) { del(r.id); toast("Route deleted"); } }}><Trash2 size={13} /> Delete route</button>}
             </div>
           );
         })}

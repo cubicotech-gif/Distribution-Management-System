@@ -3,7 +3,7 @@ import { useState } from "react";
 import { Printer, Truck } from "lucide-react";
 import { useStore, useUser } from "@/lib/store";
 import { ago, pcsOf } from "@/lib/calc";
-import { Avatar, Empty, Modal, toast } from "@/components/ui";
+import { Avatar, Empty, Modal, Spinner, toast, useBusy } from "@/components/ui";
 import type { Trip } from "@/lib/types";
 
 export default function Dispatch() {
@@ -22,6 +22,7 @@ export default function Dispatch() {
   const [driver, setDriver] = useState("u-d1");
   const [ke, setKe] = useState("u-r1");
   const [sheet, setSheet] = useState<Trip | null>(null);
+  const [busy, run] = useBusy();
   const drivers = users.filter((u) => u.role === "delivery");
   const kes = users.filter((u) => u.role === "recovery");
   const cartons = (ids: string[]) => Math.round(orders.filter((o) => ids.includes(o.id)).reduce((s, o) => s + o.lines.reduce((a, l) => { const p = products.find((x) => x.id === l.productId)!; return a + pcsOf(l, p) / p.packSize; }, 0), 0));
@@ -34,7 +35,7 @@ export default function Dispatch() {
           <div className="text-xs text-ink2">Tick the invoices for one truck, assign the delivery boy and KE, then create the load sheet.</div>
         </div>
         <div className="min-h-0 flex-1 overflow-auto">
-          {ready.length === 0 && <Empty title="Nothing to load" hint="Invoices from back office appear here" />}
+          {ready.length === 0 && <Empty title="Nothing to load" hint="Once back office issues an invoice for a picked order, it appears here ready for a truck." />}
           {ready.map((o) => {
             const c = customers.find((x) => x.id === o.customerId)!;
             const on = pick.includes(o.id);
@@ -53,7 +54,7 @@ export default function Dispatch() {
             <select className="field" value={driver} onChange={(e) => setDriver(e.target.value)}>{drivers.map((d) => <option key={d.id} value={d.id}>{d.name} (driver)</option>)}</select>
             <select className="field" value={ke} onChange={(e) => setKe(e.target.value)}>{kes.map((d) => <option key={d.id} value={d.id}>{d.name} (KE)</option>)}</select>
           </div>
-          <button className="btn btn-primary h-9 w-full justify-center" disabled={!pick.length} onClick={() => { createTrip(pick, vehicle, driver, ke, by); setPick([]); toast("Load sheet created"); }}>
+          <button className="btn btn-primary h-9 w-full justify-center" disabled={!pick.length || busy} onClick={() => run(() => { createTrip(pick, vehicle, driver, ke, by); setPick([]); toast("Load sheet created"); })}>{busy ? <Spinner /> : null}
             Create load sheet · {pick.length} invoices · {cartons(pick)} cartons
           </button>
         </div>
@@ -76,7 +77,7 @@ export default function Dispatch() {
               </div>
               <div className="mt-3 flex gap-2">
                 <button className="btn h-8" onClick={() => setSheet(t)}><Printer size={13} /> Load sheet</button>
-                {t.status === "loading" && <button className="btn btn-primary h-8" onClick={() => { dispatchTrip(t.id, by); toast(`${t.folio} released`); }}>Truck loaded, dispatch</button>}
+                {t.status === "loading" && <button className="btn btn-primary h-8" disabled={busy} onClick={() => run(() => { dispatchTrip(t.id, by); toast(`${t.folio} released`); })}>{busy ? <Spinner /> : null}Truck loaded, dispatch</button>}
               </div>
             </div>
           ))}

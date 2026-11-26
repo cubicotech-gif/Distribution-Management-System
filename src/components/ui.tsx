@@ -150,11 +150,61 @@ export function Spark({ seed, w = 54, h = 16 }: { seed: number; w?: number; h?: 
   );
 }
 
-export function Empty({ title, hint }: { title: string; hint?: string }) {
+export function Empty({ title, hint, action }: { title: string; hint?: string; action?: { label: string; onClick?: () => void; href?: string } }) {
+  const btn = action && (action.href
+    ? <a href={action.href} className="btn btn-primary mt-3">{action.label}</a>
+    : <button className="btn btn-primary mt-3" onClick={action.onClick}>{action.label}</button>);
   return (
-    <div className="flex h-full min-h-40 flex-col items-center justify-center gap-1 text-center text-ink3">
-      <div className="text-[13px] font-semibold text-ink2">{title}</div>
-      {hint && <div className="text-xs">{hint}</div>}
+    <div className="flex h-full min-h-44 flex-col items-center justify-center gap-1 px-6 text-center text-ink3">
+      <svg width="40" height="40" viewBox="0 0 40 40" fill="none" stroke="currentColor" strokeWidth="1.5" className="mb-2 opacity-50"><rect x="6" y="9" width="28" height="22" rx="4" /><path d="M6 17h28M14 24h6" strokeLinecap="round" /></svg>
+      <div className="text-[13.5px] font-semibold text-ink2">{title}</div>
+      {hint && <div className="max-w-[320px] text-xs">{hint}</div>}
+      {btn}
+    </div>
+  );
+}
+
+export function Spinner({ size = 14 }: { size?: number }) {
+  return <svg className="spin" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M12 3a9 9 0 1 0 9 9" opacity=".9" /></svg>;
+}
+
+/** Runs an action with a short, visible "working" state so double clicks are impossible and users get feedback. */
+export function useBusy(ms = 380): [boolean, (fn: () => void | Promise<void>) => void] {
+  const [busy, setBusy] = useState(false);
+  const run = (fn: () => void | Promise<void>) => {
+    if (busy) return;
+    setBusy(true);
+    setTimeout(async () => { try { await fn(); } finally { setBusy(false); } }, ms);
+  };
+  return [busy, run];
+}
+
+type ConfirmOpts = { title: string; body?: string; confirm?: string; danger?: boolean };
+let askFn: (o: ConfirmOpts) => Promise<boolean> = async () => true;
+export const ask = (o: ConfirmOpts) => askFn(o);
+export function ConfirmHost() {
+  const [o, setO] = useState<(ConfirmOpts & { res: (v: boolean) => void }) | null>(null);
+  useEffect(() => {
+    askFn = (opts) => new Promise((res) => setO({ ...opts, res }));
+  }, []);
+  useEffect(() => {
+    if (!o) return;
+    const fn = (e: KeyboardEvent) => { if (e.key === "Escape") { o.res(false); setO(null); } };
+    window.addEventListener("keydown", fn);
+    return () => window.removeEventListener("keydown", fn);
+  }, [o]);
+  if (!o) return null;
+  const done = (v: boolean) => { o.res(v); setO(null); };
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4" onMouseDown={() => done(false)}>
+      <div className="panel pop w-full max-w-[400px] p-5" role="alertdialog" aria-modal="true" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="text-[15px] font-bold">{o.title}</div>
+        {o.body && <div className="mt-1.5 text-[13px] leading-relaxed text-ink2">{o.body}</div>}
+        <div className="mt-5 flex justify-end gap-2">
+          <button className="btn" onClick={() => done(false)}>Cancel</button>
+          <button autoFocus className={`btn ${o.danger ? "" : "btn-primary"}`} style={o.danger ? { background: "var(--bad-fg)", borderColor: "var(--bad-fg)", color: "white" } : undefined} onClick={() => done(true)}>{o.confirm ?? "Confirm"}</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -182,22 +232,23 @@ export function Modal({ open, onClose, title, children, width = 560 }: {
   );
 }
 
-let toastFn: (m: string) => void = () => {};
-export const toast = (m: string) => toastFn(m);
+let toastFn: (m: string, o?: { undo?: () => void }) => void = () => {};
+export const toast = (m: string, o?: { undo?: () => void }) => toastFn(m, o);
 export function Toaster() {
-  const [items, setItems] = useState<{ id: number; m: string }[]>([]);
+  const [items, setItems] = useState<{ id: number; m: string; undo?: () => void }[]>([]);
   useEffect(() => {
-    toastFn = (m) => {
+    toastFn = (m, o) => {
       const id = Math.random();
-      setItems((x) => [...x, { id, m }]);
-      setTimeout(() => setItems((x) => x.filter((i) => i.id !== id)), 2600);
+      setItems((x) => [...x.slice(-3), { id, m, undo: o?.undo }]);
+      setTimeout(() => setItems((x) => x.filter((i) => i.id !== id)), o?.undo ? 6000 : 2800);
     };
   }, []);
   return (
-    <div className="pointer-events-none fixed bottom-4 left-1/2 z-[60] flex -translate-x-1/2 flex-col gap-2">
+    <div className="pointer-events-none fixed bottom-4 left-1/2 z-[80] flex -translate-x-1/2 flex-col items-center gap-2" role="status" aria-live="polite">
       {items.map((i) => (
-        <div key={i.id} className="slidein rounded-xl bg-[#16201b] px-4 py-2 text-[13px] font-medium text-white shadow-lg">
+        <div key={i.id} className="slidein pointer-events-auto flex items-center gap-3 rounded-xl bg-[#16201b] px-4 py-2 text-[13px] font-medium text-white shadow-lg">
           {i.m}
+          {i.undo && <button className="rounded-md bg-white/15 px-2 py-0.5 text-[12px] font-bold hover:bg-white/25" onClick={() => { i.undo!(); setItems((x) => x.filter((y) => y.id !== i.id)); }}>Undo</button>}
         </div>
       ))}
     </div>

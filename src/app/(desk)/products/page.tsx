@@ -8,7 +8,7 @@ import type { PriceList, Product, Scheme } from "@/lib/types";
 import MasterForm from "@/components/MasterForm";
 import PriceListEditor from "@/components/PriceListEditor";
 import { BulkPriceModal, ImportModal, exportProducts } from "@/components/ProductTools";
-import { Chips, Empty, Thumb, ViewSwitch, toast, useViewMode } from "@/components/ui";
+import { Chips, Empty, Thumb, ViewSwitch, ask, toast, useViewMode } from "@/components/ui";
 
 type Tab = "products" | "unlisted" | "lists" | "schemes" | "history";
 type Sort = "name" | "price" | "margin" | "stock";
@@ -67,9 +67,9 @@ function Products() {
     <span className="inline-flex gap-1">
       <button className="btn h-7 px-2" title="Edit" onClick={() => setEdit(p)}><Pencil size={13} /></button>
       {used(p) ? (
-        <button className="btn h-7 px-2" title={p.status === "active" ? "Deactivate (hide from bookers)" : "Activate"} onClick={() => { setStatus(p.id, p.status === "active" ? "inactive" : "active"); toast(p.status === "active" ? `${p.name} hidden from bookers` : `${p.name} is active again`); }}>{p.status === "active" ? <EyeOff size={13} /> : <Eye size={13} />}</button>
+        <button className="btn h-7 px-2" title={p.status === "active" ? "Deactivate (hide from bookers)" : "Activate"} onClick={() => { const was = p.status; setStatus(p.id, was === "active" ? "inactive" : "active"); toast(was === "active" ? `${p.name} hidden from bookers` : `${p.name} is active again`, { undo: () => setStatus(p.id, was) }); }}>{p.status === "active" ? <EyeOff size={13} /> : <Eye size={13} />}</button>
       ) : (
-        <button className="btn btn-danger h-7 px-2" title="Delete (never used)" onClick={() => { if (del(p.id)) toast(`${p.name} deleted`); }}><Trash2 size={13} /></button>
+        <button className="btn btn-danger h-7 px-2" title="Delete (never used)" onClick={async () => { if (await ask({ title: `Delete ${p.name}?`, body: "It was never used, so it will be removed completely.", confirm: "Delete", danger: true })) { if (del(p.id)) toast(`${p.name} deleted`); } }}><Trash2 size={13} /></button>
       )}
     </span>
   );
@@ -108,7 +108,7 @@ function Products() {
       )}
 
       <div className={`min-h-0 flex-1 overflow-auto ${tab === "products" && view === "tiles" ? "" : "panel"}`}>
-        {tab === "products" && rows.length === 0 && <div className="panel"><Empty title="No products match" hint="Clear a filter or the search" /></div>}
+        {tab === "products" && rows.length === 0 && <div className="panel"><Empty title="No products match" hint="Try a different word, or clear the filters." action={{ label: "Clear filters", onClick: () => { setQ(""); setCat("all"); setSup("all"); setStk("all"); setShow("all"); } }} /></div>}
 
         {tab === "products" && rows.length > 0 && view === "tiles" && (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(215px,1fr))] gap-3">
@@ -193,7 +193,7 @@ function Products() {
                   <td className="num text-right">{l.adjustPct > 0 ? "+" : ""}{l.adjustPct}%</td>
                   <td className="num text-right">{Object.keys(l.overrides).length || "—"}</td>
                   <td className="num text-right">{customers.filter((c) => c.priceListId === l.id).length}</td>
-                  <td className="space-x-1 pr-4 text-right">{canEdit && <><button className="btn h-7" onClick={() => setPl(l)}><Pencil size={13} /> Edit prices</button>{l.id !== "pl1" && <button className="btn btn-danger h-7 px-2" onClick={() => toast(delList(l.id) ? "Deleted" : "Customers still use this list")}><Trash2 size={13} /></button>}</>}</td>
+                  <td className="space-x-1 pr-4 text-right">{canEdit && <><button className="btn h-7" onClick={() => setPl(l)}><Pencil size={13} /> Edit prices</button>{l.id !== "pl1" && <button className="btn btn-danger h-7 px-2" onClick={async () => { if (await ask({ title: `Delete the ${l.name} price list?`, confirm: "Delete", danger: true })) toast(delList(l.id) ? "Price list deleted" : "Customers still use this list. Move them to another list first."); }}><Trash2 size={13} /></button>}</>}</td>
                 </tr>
               ))}
             </tbody>
@@ -210,7 +210,7 @@ function Products() {
                   <td><span className={`chip ${s.type === "free" ? "chip-info" : "chip-ok"}`}>{schemeLabel(s)}</span></td>
                   <td className="num text-ink2">{s.from || s.to ? `${s.from ?? "…"} → ${s.to ?? "…"}` : "Always"}</td>
                   <td className="text-ink2">{s.route || "All routes"}</td>
-                  <td className="space-x-1 pr-4 text-right">{canEdit && <><button className="btn h-7 px-2" onClick={() => setSch(s)}><Pencil size={13} /></button><button className="btn btn-danger h-7 px-2" onClick={() => delScheme(s.id)}><Trash2 size={13} /></button></>}</td>
+                  <td className="space-x-1 pr-4 text-right">{canEdit && <><button className="btn h-7 px-2" onClick={() => setSch(s)}><Pencil size={13} /></button><button className="btn btn-danger h-7 px-2" onClick={async () => { if (await ask({ title: "Delete this scheme?", body: "New orders will stop getting this discount. Existing orders are not changed.", confirm: "Delete", danger: true })) { delScheme(s.id); toast("Scheme deleted"); } }}><Trash2 size={13} /></button></>}</td>
                 </tr>
               ))}
             </tbody>
@@ -242,12 +242,22 @@ function Products() {
           title={edit.status === "unlisted" ? `List ${edit.name}` : products.some((p) => p.id === edit.id) ? "Edit product" : "Add product"} initial={edit} onClose={() => setEdit(null)}
           fields={[
             { key: "image", label: "Picture", type: "image" },
-            { key: "name", label: "Name" }, { key: "code", label: "Code" }, { key: "category", label: "Category", datalist: categories }, { key: "brand", label: "Brand" },
+            { key: "name", label: "Name", required: true }, { key: "code", label: "Code", required: true }, { key: "category", label: "Category", datalist: categories, required: true }, { key: "brand", label: "Brand" },
             { key: "supplier", label: "Supplier", type: "select", options: suppliers.map((s) => [s.name, s.name]) }, { key: "barcode", label: "Barcode" },
             { key: "packSize", label: "Pieces per carton", type: "number" }, { key: "cartonPrice", label: "Sale price / carton (Rs.)", type: "number" },
             { key: "costPrice", label: "Cost / carton (Rs.)", type: "number" }, { key: "taxPct", label: "Sales tax %", type: "number" },
             { key: "reorder", label: "Reorder level (pcs)", type: "number" }, { key: "leadDays", label: "Supplier lead time (days)", type: "number" }, { key: "bin", label: "Rack" },
           ]}
+          validate={(v) => ({
+            code: !v.code ? "" : products.some((p) => p.id !== v.id && p.code.toLowerCase() === v.code.toLowerCase()) ? "Another product already uses this code" : "",
+            packSize: !(v.packSize >= 1) ? "Pieces per carton must be at least 1" : "",
+            cartonPrice: v.cartonPrice < 0 ? "Price cannot be negative" : "",
+            costPrice: v.costPrice < 0 ? "Cost cannot be negative" : "",
+            taxPct: v.taxPct < 0 || v.taxPct > 100 ? "Tax must be between 0 and 100" : "",
+            reorder: v.reorder < 0 ? "Reorder level cannot be negative" : "",
+            leadDays: v.leadDays < 0 || v.leadDays > 90 ? "Lead time must be 0 to 90 days" : "",
+            barcode: v.barcode && !/^\d{8,14}$/.test(v.barcode) ? "Barcode is 8 to 14 digits" : "",
+          })}
           footer={(v) => {
             const old = products.find((p) => p.id === v.id)?.cartonPrice ?? 0;
             const m = v.cartonPrice ? ((v.cartonPrice - v.costPrice) / v.cartonPrice) * 100 : 0;
@@ -280,6 +290,12 @@ function Products() {
             { key: "from", label: "Valid from", type: "date" }, { key: "to", label: "Valid to", type: "date" },
             { key: "route", label: "Only for route", type: "select", options: [["", "All routes"], ...routes.map((r) => [r.name, r.name] as [string, string])] },
           ]}
+          validate={(v) => ({
+            minCtn: !(v.minCtn >= 1) ? "Buy at least 1 carton" : "",
+            discPct: v.type === "discount" && (v.discPct <= 0 || v.discPct > 50) ? "Discount must be between 0 and 50%" : "",
+            freeCtn: v.type === "free" && !(v.freeCtn >= 1) ? "Give at least 1 free carton" : "",
+            to: v.from && v.to && v.to < v.from ? "End date is before the start date" : "",
+          })}
           footer={(v) => <div className="text-xs text-ink2">{v.type === "free" ? `Buy ${v.minCtn} cartons, get ${v.freeCtn} free. The free cartons appear as a separate zero-price line on the order.` : `Buy ${v.minCtn}+ cartons, ${v.discPct}% off. Applied automatically; a hand-typed discount overrides it.`}</div>}
           onSave={(v) => { upsertScheme({ ...v, from: v.from || undefined, to: v.to || undefined, route: v.route || undefined }); setSch(null); toast("Scheme saved"); }} />
       )}

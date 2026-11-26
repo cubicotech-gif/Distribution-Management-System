@@ -8,7 +8,8 @@ import {
 } from "lucide-react";
 import { HOME, useStore, useUser } from "@/lib/store";
 import type { Role } from "@/lib/types";
-import { Avatar, Kbd, Toaster, useHydrated, toast } from "./ui";
+import { Avatar, ConfirmHost, Kbd, Modal, Toaster, ask, useHydrated, toast } from "./ui";
+import SkeletonPage from "./Skeleton";
 
 type Badge = "orders" | "pick" | "invoice" | "receive" | "approvals" | "returns" | "dispatch" | "settle" | "plan";
 type Nav = { href: string; label: string; icon: React.ComponentType<{ size?: number }>; roles: Role[]; badge?: Badge };
@@ -68,6 +69,32 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const reset = useStore((s) => s.reset);
   const { t, toggle } = useTheme();
   const [pal, setPal] = useState(false);
+  const [help, setHelp] = useState(false);
+  const [ready, setReady] = useState(false);
+  const [online, setOnline] = useState(true);
+
+  // short skeleton on every page change so screens never "pop" in half-drawn
+  useEffect(() => {
+    setReady(false);
+    const t = setTimeout(() => setReady(true), 320);
+    return () => clearTimeout(t);
+  }, [path]);
+
+  useEffect(() => {
+    setOnline(navigator.onLine);
+    const on = () => setOnline(true), off = () => setOnline(false);
+    window.addEventListener("online", on); window.addEventListener("offline", off);
+    return () => { window.removeEventListener("online", on); window.removeEventListener("offline", off); };
+  }, []);
+
+  useEffect(() => {
+    const fn = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      if ((e.key === "?" || (e.key === "/" && e.shiftKey)) && !["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName)) { e.preventDefault(); setHelp((h) => !h); }
+    };
+    window.addEventListener("keydown", fn);
+    return () => window.removeEventListener("keydown", fn);
+  }, []);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -87,6 +114,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const trips = useStore((s) => s.trips);
   const approvals = useStore((s) => s.approvals);
   const products = useStore((s) => s.products);
+  useEffect(() => {
+    const label = NAV.find((n) => path.startsWith(n.href))?.label;
+    document.title = label ? `${label} · Zarie DMS` : "Zarie Distributors · DMS";
+  }, [path]);
+
   const badges = useMemo(() => ({
     orders: orders.filter((o) => o.status === "booked" || (o.status === "hold" && !o.needsOwner)).length,
     pick: orders.filter((o) => o.status === "approved").length,
@@ -103,6 +135,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     return <div className="grid h-screen place-items-center text-ink3">Loading…</div>;
   }
   const nav = NAV.filter((n) => n.roles.includes(user.role));
+  const current = nav.find((n) => path.startsWith(n.href));
+  const kind = path.startsWith("/dashboard") ? "tiles" : ["/orders", "/pick", "/receiving", "/dispatch", "/returns", "/settlements", "/approvals"].some((x) => path.startsWith(x)) ? "split" : "table";
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -129,7 +163,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           })}
         </nav>
         <div className="space-y-1 border-t border-line p-2">
-          <button className="btn w-full justify-start border-transparent" onClick={() => { reset(); toast("Demo data reset"); }}>
+          <button className="btn w-full justify-start border-transparent" onClick={async () => { if (await ask({ title: "Reset all demo data?", body: "Every order, stock change and setting you made returns to the starting data. This cannot be undone.", confirm: "Reset", danger: true })) { reset(); toast("Demo data reset"); } }}>
             <RotateCcw size={14} /> Reset demo data
           </button>
           <div className="flex items-center gap-2 rounded-lg px-2 py-1.5">
@@ -161,10 +195,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             {t === "dark" ? <Sun size={15} /> : <Moon size={15} />}
           </button>
         </header>
-        <main className="min-h-0 flex-1 overflow-auto p-4">{children}</main>
+        {!online && <div className="bg-[var(--warn-bg)] px-5 py-1.5 text-center text-xs font-semibold text-[var(--warn-fg)]">You are offline. Changes are kept on this device and will not reach other devices until the connection returns.</div>}
+        <main className="min-h-0 flex-1 overflow-auto p-4">{ready ? children : <SkeletonPage kind={kind} />}</main>
       </div>
       {pal && <Palette onClose={() => setPal(false)} role={user.role} />}
+      {help && <HelpOverlay onClose={() => setHelp(false)} path={path} label={current?.label ?? ""} />}
       <Toaster />
+      <ConfirmHost />
     </div>
   );
 }
@@ -226,6 +263,23 @@ function Palette({ onClose, role }: { onClose: () => void; role: Role }) {
         </div>
       </div>
     </div>
+  );
+}
+
+const PAGE_KEYS: Record<string, [string, string][]> = {
+  "/orders": [["J / K", "Move up and down the list"], ["Enter", "Main action (approve, invoice)"], ["N", "New order"], ["/", "Filter the list"], ["H", "Put order on hold"]],
+  "/pick": [["Ctrl + Enter", "Confirm and create challan"]],
+};
+function HelpOverlay({ onClose, path, label }: { onClose: () => void; path: string; label: string }) {
+  const page = Object.entries(PAGE_KEYS).find(([k]) => path.startsWith(k))?.[1] ?? [];
+  const rows: [string, string][] = [["Ctrl + K", "Search or jump anywhere"], ["?", "Show this help"], ["Esc", "Close a window or cancel"], ["Tab / Shift + Tab", "Next / previous field"], ["Enter", "Save in a form"]];
+  return (
+    <Modal open onClose={onClose} title="Keyboard shortcuts" width={460}>
+      <div className="space-y-4">
+        {page.length > 0 && <div><div className="th mb-1.5">On {label}</div>{page.map(([k, d]) => <div key={k} className="flex items-center justify-between border-t border-line py-1.5 first:border-0"><span>{d}</span><Kbd>{k}</Kbd></div>)}</div>}
+        <div><div className="th mb-1.5">Everywhere</div>{rows.map(([k, d]) => <div key={k} className="flex items-center justify-between border-t border-line py-1.5 first:border-0"><span>{d}</span><Kbd>{k}</Kbd></div>)}</div>
+      </div>
+    </Modal>
   );
 }
 export { Plus };

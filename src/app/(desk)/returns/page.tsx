@@ -1,7 +1,7 @@
 "use client";
 import { useStore, useUser } from "@/lib/store";
 import { ago, fmt } from "@/lib/calc";
-import { Empty, Thumb, toast } from "@/components/ui";
+import { Empty, Spinner, Thumb, toast, useBusy } from "@/components/ui";
 
 export default function Returns() {
   const returns = useStore((s) => s.returns);
@@ -9,6 +9,7 @@ export default function Returns() {
   const products = useStore((s) => s.products);
   const inspect = useStore((s) => s.inspectReturn);
   const user = useUser();
+  const [busy, run] = useBusy();
   const pending = returns.filter((r) => r.status === "pending");
   const done = returns.filter((r) => r.status === "inspected");
   const hideMoney = user?.role === "warehouse";
@@ -17,7 +18,7 @@ export default function Returns() {
       <div><h1 className="text-[18px] font-bold">Returns inspection</h1><p className="text-ink2">Goods coming back from customers. Check the physical condition and decide. Good items go back on the shelf; damaged items go to the damaged pile for the factory.</p></div>
       <div className="panel">
         <div className="th border-b border-line px-4 py-2.5">Waiting for inspection · {pending.length}</div>
-        {pending.length === 0 && <Empty title="Nothing to inspect" />}
+        {pending.length === 0 && <Empty title="Nothing to inspect" hint="Goods that delivery staff or back office send back appear here for a decision." />}
         {pending.map((r) => {
           const p = products.find((x) => x.id === r.productId)!;
           const c = customers.find((x) => x.id === r.customerId)!;
@@ -28,8 +29,8 @@ export default function Returns() {
                 <div className="font-semibold">{p.name} <span className="num text-ink3">× {r.qtyPcs} pcs ({Math.round((r.qtyPcs / p.packSize) * 10) / 10} ctn)</span></div>
                 <div className="text-xs text-ink2">{c.name} · <span className="num">{r.folio}</span> · reason: <b>{r.reason}</b> · reported by {r.by} · {ago(r.at)}</div>
               </div>
-              <button className="btn" onClick={() => { inspect(r.id, "damaged", user?.initials ?? "—"); toast("Moved to damaged stock. Credit note issued"); }}>Damaged</button>
-              <button className="btn btn-primary" onClick={() => { inspect(r.id, "good", user?.initials ?? "—"); toast("Back on the shelf. Credit note issued"); }}>Good, restock</button>
+              <button className="btn" disabled={busy} onClick={() => run(() => { inspect(r.id, "damaged", user?.initials ?? "—"); toast("Moved to damaged stock. Credit note issued"); })}>Damaged</button>
+              <button className="btn btn-primary" disabled={busy} onClick={() => run(() => { inspect(r.id, "good", user?.initials ?? "—"); toast("Back on the shelf. Credit note issued"); })}>{busy ? <Spinner /> : null}Good, restock</button>
             </div>
           );
         })}

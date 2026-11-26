@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { Printer } from "lucide-react";
 import { useStore, useUser } from "@/lib/store";
 import { ago, fmt, pcsOf } from "@/lib/calc";
-import { Avatar, Empty, Kbd, StatusChip, Thumb, toast } from "@/components/ui";
+import { Avatar, Empty, Kbd, Spinner, StatusChip, Thumb, toast, useBusy } from "@/components/ui";
 import Challan from "@/components/Challan";
 import type { Order, Product } from "@/lib/types";
 
@@ -33,6 +33,7 @@ export default function Pick() {
   const [vals, setVals] = useState<Record<string, Record<number, number>>>({});
   const [why, setWhy] = useState<Record<string, Record<number, string>>>({});
   const [view, setView] = useState<Order | null>(null);
+  const [busy, doRun] = useBusy();
   const cur = queue.find((o) => o.id === sel) ?? queue[0];
   const c = cur && customers.find((x) => x.id === cur.customerId);
 
@@ -123,7 +124,7 @@ export default function Pick() {
             </div>
             <div className="flex items-center justify-between border-t border-line px-5 py-3">
               <div className="text-xs text-ink2">Stock is deducted by batch, the challan is created and back office is notified</div>
-              <button className="btn btn-primary h-9 px-4 text-[13px]" onClick={run}>Confirm and create challan <Kbd>Ctrl</Kbd><Kbd>↵</Kbd></button>
+              <button className="btn btn-primary h-9 px-4 text-[13px]" disabled={busy} onClick={() => doRun(run)}>{busy ? <Spinner /> : null}Confirm and create challan <Kbd>Ctrl</Kbd><Kbd>↵</Kbd></button>
             </div>
           </>
         )}

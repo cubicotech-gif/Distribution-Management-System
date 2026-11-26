@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useStore, useUser } from "@/lib/store";
 import { ago, fmt } from "@/lib/calc";
-import { Empty, toast } from "@/components/ui";
+import { Empty, ask, toast } from "@/components/ui";
 
 export default function Approvals() {
   const approvals = useStore((s) => s.approvals);
@@ -19,7 +19,7 @@ export default function Approvals() {
       <div><h1 className="text-[18px] font-bold">Approvals</h1><p className="text-ink2">Only exceptions reach you: orders over the credit limit, discounts above 5%, overdue customers, and large stock-count differences. Everything else flows without you.</p></div>
       <div className="panel">
         <div className="th border-b border-line px-4 py-2.5">Waiting for you · {pending.length}</div>
-        {pending.length === 0 && <Empty title="All clear" hint="Exceptions from back office and warehouse will appear here" />}
+        {pending.length === 0 && <Empty title="All clear" hint="Orders over the credit limit, big discounts, price changes and stock-count differences will wait here for you." />}
         {pending.map((a) => {
           const o = a.kind === "order" ? orders.find((x) => x.id === a.refId) : undefined;
           const c = o ? customers.find((x) => x.id === o.customerId) : undefined;
@@ -32,7 +32,7 @@ export default function Approvals() {
               </div>
               {a.amount > 0 && <div className="num text-[15px] font-bold">Rs. {fmt(a.amount)}</div>}
               {o && <Link href={`/orders?id=${o.id}`} className="btn">View</Link>}
-              <button className="btn btn-danger" onClick={() => { reject(a.id, by); toast("Rejected"); }}>Reject</button>
+              <button className="btn btn-danger" onClick={async () => { if (await ask({ title: `Reject ${a.text}?`, body: a.kind === "order" ? "The order will be cancelled and the booker is told." : "The request is closed without changes.", confirm: "Reject", danger: true })) { reject(a.id, by); toast("Rejected"); } }}>Reject</button>
               <button className="btn btn-primary" onClick={() => { approve(a.id, by); toast("Approved"); }}>Approve</button>
             </div>
           );

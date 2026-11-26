@@ -4,7 +4,7 @@ import { Plus, Pencil, Trash2 } from "lucide-react";
 import { useStore, useUser } from "@/lib/store";
 import type { Supplier } from "@/lib/types";
 import MasterForm from "@/components/MasterForm";
-import { toast } from "@/components/ui";
+import { ask, toast } from "@/components/ui";
 
 export default function Suppliers() {
   const suppliers = useStore((s) => s.suppliers);
@@ -35,7 +35,7 @@ export default function Suppliers() {
                   <td>{s.terms}</td><td className="num text-right">{s.leadDays} days</td><td className="num text-right">{ps.length}</td>
                   <td className="num text-right">{pos.filter((p) => p.status === "ordered").length || "—"}</td>
                   <td className="text-right">{claims ? <span className="chip chip-bad num">{claims}</span> : <span className="text-ink3">—</span>}</td>
-                  <td className="space-x-1 pr-4 text-right">{canEdit && <><button className="btn h-7 px-2" onClick={() => setEdit(s)}><Pencil size={13} /></button><button className="btn btn-danger h-7 px-2" onClick={() => toast(del(s.id) ? "Supplier deleted" : "Still has products. Cannot delete.")}><Trash2 size={13} /></button></>}</td>
+                  <td className="space-x-1 pr-4 text-right">{canEdit && <><button className="btn h-7 px-2" onClick={() => setEdit(s)}><Pencil size={13} /></button><button className="btn btn-danger h-7 px-2" onClick={async () => { if (await ask({ title: `Delete ${s.name}?`, confirm: "Delete", danger: true })) toast(del(s.id) ? "Supplier deleted" : "This supplier still has products, so it cannot be deleted."); }}><Trash2 size={13} /></button></>}</td>
                 </tr>
               );
             })}
@@ -44,7 +44,8 @@ export default function Suppliers() {
       </div>
       {edit && (
         <MasterForm<Supplier> title={suppliers.some((s) => s.id === edit.id) ? "Edit supplier" : "Add supplier"} initial={edit} onClose={() => setEdit(null)}
-          fields={[{ key: "name", label: "Company name" }, { key: "contact", label: "Contact person" }, { key: "phone", label: "Phone" }, { key: "terms", label: "Payment terms", type: "select", options: ["Advance", "Net 7", "Net 15", "Net 21", "Net 30"].map((t) => [t, t] as [string, string]) }, { key: "leadDays", label: "Lead time (days)", type: "number" }]}
+          validate={(v) => ({ name: v.name && suppliers.some((x) => x.id !== v.id && x.name.toLowerCase() === v.name.toLowerCase()) ? "This supplier already exists" : "", leadDays: v.leadDays < 0 || v.leadDays > 90 ? "Lead time must be 0 to 90 days" : "" })}
+          fields={[{ key: "name", label: "Company name", required: true }, { key: "contact", label: "Contact person", required: true }, { key: "phone", label: "Phone", required: true }, { key: "terms", label: "Payment terms", type: "select", options: ["Advance", "Net 7", "Net 15", "Net 21", "Net 30"].map((t) => [t, t] as [string, string]) }, { key: "leadDays", label: "Lead time (days)", type: "number" }]}
           footer={() => <div className="text-xs text-ink2">Saving updates the lead time on all products from this supplier.</div>}
           onSave={(v) => { upsert(v); setEdit(null); toast("Supplier saved"); }} />
       )}

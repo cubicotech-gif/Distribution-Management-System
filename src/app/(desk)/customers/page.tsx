@@ -6,7 +6,7 @@ import { creditUsedPct, fmt, overdueAmount } from "@/lib/calc";
 import type { Customer } from "@/lib/types";
 import MasterForm from "@/components/MasterForm";
 import Statement from "@/components/Statement";
-import { Avatar, Chips, Empty, Meter, ViewSwitch, toast, useViewMode } from "@/components/ui";
+import { Avatar, Chips, Empty, Meter, ViewSwitch, ask, toast, useViewMode } from "@/components/ui";
 
 type Seg = "all" | "credit" | "cash" | "blocked" | "overdue";
 type Sort = "name" | "balance" | "credit";
@@ -52,8 +52,8 @@ export default function Customers() {
       <button className="btn h-7" onClick={() => setStmt(c)}><FileText size={13} /></button>
       {canEdit && <>
         <button className="btn h-7 px-2" title="Edit" onClick={() => setEdit(c)}><Pencil size={13} /></button>
-        <button className="btn h-7 px-2" title={c.status === "blocked" ? "Unblock" : "Block new orders"} onClick={() => { if (c.status === "blocked") { setStatus([c.id], "active"); toast(`${c.name} unblocked`); } else { setStatus([c.id], "blocked", c.balance > 0 ? "Payment overdue" : "Blocked by back office"); toast(`${c.name} blocked`); } }}>{c.status === "blocked" ? <CheckCircle2 size={13} /> : <Ban size={13} />}</button>
-        <button className="btn btn-danger h-7 px-2" title="Delete" onClick={() => toast(del(c.id) ? `${c.name} deleted` : "Has orders or a balance. Block it instead.")}><Trash2 size={13} /></button>
+        <button className="btn h-7 px-2" title={c.status === "blocked" ? "Unblock" : "Block new orders"} onClick={() => { if (c.status === "blocked") { setStatus([c.id], "active"); toast(`${c.name} unblocked`, { undo: () => setStatus([c.id], "blocked", c.blockedReason) }); } else { setStatus([c.id], "blocked", c.balance > 0 ? "Payment overdue" : "Blocked by back office"); toast(`${c.name} blocked. Bookers cannot take new orders`, { undo: () => setStatus([c.id], "active") }); } }}>{c.status === "blocked" ? <CheckCircle2 size={13} /> : <Ban size={13} />}</button>
+        <button className="btn btn-danger h-7 px-2" title="Delete" onClick={async () => { if (await ask({ title: `Delete ${c.name}?`, body: "This only works for customers with no orders and no balance.", confirm: "Delete", danger: true })) toast(del(c.id) ? `${c.name} deleted` : "This customer has orders or a balance. Block it instead."); }}><Trash2 size={13} /></button>
       </>}
     </span>
   );
@@ -77,14 +77,14 @@ export default function Customers() {
           <span className="text-[13px] font-semibold">{sel.length} selected</span>
           <select className="field w-44" value={target} onChange={(e) => setTarget(e.target.value)}><option value="">Move to route…</option>{routes.map((r) => <option key={r.id} value={r.name}>{r.name} ({users.find((u) => u.id === r.bookerId)?.initials})</option>)}</select>
           <button className="btn" disabled={!target} onClick={() => { move(sel, target); toast(`${sel.length} customers moved to ${target}`); setSel([]); setTarget(""); }}>Move</button>
-          <button className="btn" onClick={() => { setStatus(sel, "blocked", "Blocked by back office"); toast("Blocked"); setSel([]); }}><Ban size={13} /> Block</button>
+          <button className="btn" onClick={async () => { if (await ask({ title: `Block ${sel.length} customers?`, body: "Bookers will not be able to take new orders for them until you unblock.", confirm: "Block", danger: true })) { setStatus(sel, "blocked", "Blocked by back office"); toast(`${sel.length} customers blocked`); setSel([]); } }}><Ban size={13} /> Block</button>
           <button className="btn" onClick={() => { setStatus(sel, "active"); toast("Unblocked"); setSel([]); }}>Unblock</button>
           <button className="btn ml-auto" onClick={() => setSel([])}>Clear</button>
         </div>
       )}
 
       <div className={`min-h-0 flex-1 overflow-auto ${view === "tiles" ? "" : "panel"}`}>
-        {rows.length === 0 && <div className="panel"><Empty title="No customers match" hint="Clear a filter or the search" /></div>}
+        {rows.length === 0 && <div className="panel"><Empty title="No customers match" hint="Try a different word, or clear the filters." action={{ label: "Clear filters", onClick: () => { setQ(""); setSeg("all"); setRoute("all"); } }} /></div>}
 
         {view === "tiles" && rows.length > 0 && (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-3">
@@ -137,13 +137,20 @@ export default function Customers() {
       {edit && (
         <MasterForm<Customer> title={customers.some((c) => c.id === edit.id) ? "Edit customer" : "Add customer"} initial={edit} onClose={() => setEdit(null)}
           fields={[
-            { key: "name", label: "Name" }, { key: "phone", label: "Phone" }, { key: "area", label: "Area" },
+            { key: "name", label: "Name", required: true }, { key: "phone", label: "Phone", required: true, hint: "e.g. 0300-1234567" }, { key: "area", label: "Area", required: true },
             { key: "route", label: "Route", type: "select", options: routes.map((r) => [r.name, r.name]) },
             { key: "type", label: "Type", type: "select", options: [["credit", "Credit"], ["cash", "Cash"]] },
             { key: "priceListId", label: "Price list", type: "select", options: lists.map((l) => [l.id, `${l.name} (${l.adjustPct > 0 ? "+" : ""}${l.adjustPct}%)`]) },
             { key: "creditLimit", label: "Credit limit (Rs.)", type: "number" }, { key: "creditDays", label: "Credit days", type: "number" },
             ...(customers.some((c) => c.id === edit.id) ? [] : [{ key: "balance" as const, label: "Opening balance (Rs.)", type: "number" as const }]),
           ]}
+          validate={(v) => ({
+            phone: v.phone && !/^[0-9+\- ]{10,16}$/.test(v.phone) ? "Enter a valid phone number" : "",
+            name: v.name && customers.some((c) => c.id !== v.id && c.name.toLowerCase() === v.name.toLowerCase()) ? "A customer with this name already exists" : "",
+            creditLimit: v.creditLimit < 0 ? "Credit limit cannot be negative" : "",
+            creditDays: v.creditDays < 0 || v.creditDays > 120 ? "Credit days must be 0 to 120" : "",
+            balance: v.balance < 0 ? "Opening balance cannot be negative" : "",
+          })}
           footer={(v) => { const r = routes.find((x) => x.name === v.route); const b = users.find((u) => u.id === r?.bookerId); return <div className="text-xs text-ink2">Booker follows the route: <b>{b?.name ?? "—"}</b>{r && <> · visits {r.days.join(", ")}</>}</div>; }}
           onSave={(v) => { upsert(v); setEdit(null); toast("Customer saved"); }} />
       )}

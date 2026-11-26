@@ -5,7 +5,7 @@ import { useStore, useUser } from "@/lib/store";
 import { ago, available, clock, fmt, lineNet, money, orderTotal, pcsOf, STEPS, STEP_LABEL, totals } from "@/lib/calc";
 import { checkOrder } from "@/lib/check";
 import type { Order, ReturnReason } from "@/lib/types";
-import { AgingBar, Avatar, CreditMeter, Kbd, Modal, StatusChip, Thumb, toast } from "./ui";
+import { AgingBar, Avatar, CreditMeter, Kbd, Modal, Spinner, StatusChip, Thumb, ask, toast, useBusy } from "./ui";
 
 export function Stepper({ o }: { o: Order }) {
   const done = (s: string) => o.trail.find((t) => t.status === s);
@@ -142,6 +142,7 @@ export default function OrderDetail({ o, primary }: { o: Order; primary?: { labe
   const hold = useStore((s) => s.holdOrder);
   const cancel = useStore((s) => s.cancelOrder);
   const user = useUser();
+  const [busy, run] = useBusy();
   const [inv, setInv] = useState(false);
   const [ret, setRet] = useState(false);
   const c = customers.find((x) => x.id === o.customerId)!;
@@ -252,11 +253,11 @@ export default function OrderDetail({ o, primary }: { o: Order; primary?: { labe
       <div className="flex items-end justify-between gap-4 border-t border-line bg-panel px-5 py-3">
         <div className="flex gap-2">
           {primary && (
-            <button className="btn btn-primary h-9 px-4 text-[13px]" onClick={primary.run}>{primary.label} <Kbd>↵</Kbd></button>
+            <button className="btn btn-primary h-9 px-4 text-[13px]" disabled={busy} onClick={() => run(primary.run)}>{busy ? <Spinner /> : null}{primary.label} <Kbd>↵</Kbd></button>
           )}
-          {editable && o.status === "booked" && <button className="btn h-9" onClick={() => { hold(o.id, by); toast("Order put on hold"); }}>Hold <Kbd>H</Kbd></button>}
+          {editable && o.status === "booked" && <button className="btn h-9" onClick={() => { hold(o.id, by); toast("Order put on hold", { undo: () => useStore.getState().restoreOrder(o.id, "booked", by) }); }}>Hold <Kbd>H</Kbd></button>}
           {!readOnly && (o.status === "booked" || o.status === "hold" || o.status === "approved") && (
-            <button className="btn btn-danger h-9" onClick={() => { cancel(o.id, by); toast("Order cancelled"); }}>Cancel</button>
+            <button className="btn btn-danger h-9" onClick={async () => { if (await ask({ title: `Cancel ${o.folio}?`, body: o.status === "approved" ? "The reserved stock is released and the warehouse is told to stop." : "The booker will see the order as cancelled.", confirm: "Cancel order", danger: true })) { cancel(o.id, by); toast("Order cancelled"); } }}>Cancel</button>
           )}
         </div>
         <div className="space-y-0.5 text-right text-xs text-ink2">

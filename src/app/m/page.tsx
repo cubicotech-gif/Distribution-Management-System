@@ -5,7 +5,7 @@ import { Route as RouteIcon, ClipboardList, Boxes, Truck, Wallet, LogOut, Moon, 
 import { useStore, useUser } from "@/lib/store";
 import { applySchemes, available, creditUsedPct, fmt, lineNet, orderTotal, totals, ago, unitRate } from "@/lib/calc";
 import type { Customer, Line, Product, ReturnReason, Unit } from "@/lib/types";
-import { Avatar, CreditMeter, Meter, StatusChip, Thumb, Toaster, ViewSwitch, toast, useHydrated, useViewMode } from "@/components/ui";
+import { Avatar, ConfirmHost, CreditMeter, Meter, StatusChip, Thumb, Toaster, ViewSwitch, toast, useHydrated, useViewMode } from "@/components/ui";
 import { useTheme } from "@/components/AppShell";
 
 type Tab = "route" | "orders" | "stock" | "trip" | "collect";
@@ -63,6 +63,7 @@ export default function Mobile() {
         ))}
       </nav>
       <Toaster />
+      <ConfirmHost />
     </>
   );
 }
