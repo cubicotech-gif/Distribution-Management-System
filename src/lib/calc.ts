@@ -1,4 +1,4 @@
-import type { Customer, Line, Order, Payment, Product, ReturnNote, Scheme, Unit } from "./types";
+import type { Customer, Line, Order, Payment, PriceList, Product, ReturnNote, Scheme, Unit } from "./types";
 
 export const fmt = (n: number) => Math.round(n).toLocaleString("en-PK");
 export const money = (n: number) => `Rs. ${fmt(n)}`;
@@ -56,16 +56,48 @@ export const STEP_LABEL: Record<string, string> = {
   booked: "Booked", approved: "Approved", picked: "Picked", invoiced: "Invoiced", delivered: "Delivered", paid: "Paid",
 };
 
-/* ---------- schemes ---------- */
-export function schemeFor(schemes: Scheme[], productId: string, qtyCtn: number) {
-  return schemes
-    .filter((s) => s.productId === productId && qtyCtn >= s.minCtn)
-    .sort((a, b) => b.discPct - a.discPct)[0];
+/* ---------- price lists ---------- */
+export function cartonPriceFor(p: Product, c: Customer | undefined, lists: PriceList[]) {
+  const pl = lists.find((l) => l.id === c?.priceListId);
+  if (!pl) return p.cartonPrice;
+  if (pl.overrides[p.id] !== undefined) return pl.overrides[p.id];
+  return Math.round(p.cartonPrice * (1 + pl.adjustPct / 100));
 }
-export function withScheme(schemes: Scheme[], l: Line): Line {
-  if (l.unit !== "ctn") return { ...l, discPct: 0, scheme: undefined };
-  const s = schemeFor(schemes, l.productId, l.qty);
-  return s ? { ...l, discPct: s.discPct, scheme: `Buy ${s.minCtn}+ ctn: ${s.discPct}% off` } : { ...l, discPct: 0, scheme: undefined };
+export function unitRate(p: Product, unit: Unit, c: Customer | undefined, lists: PriceList[]) {
+  const ctn = cartonPriceFor(p, c, lists);
+  return unit === "ctn" ? ctn : Math.round((ctn / p.packSize) * 100) / 100;
+}
+
+/* ---------- schemes ---------- */
+const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+export function schemeActive(s: Scheme, route?: string, now = new Date()) {
+  const t = iso(now);
+  if (s.from && t < s.from) return false;
+  if (s.to && t > s.to) return false;
+  if (s.route && s.route !== "all" && s.route !== route) return false;
+  return true;
+}
+export function schemeLabel(s: Scheme) {
+  return s.type === "free" ? `Buy ${s.minCtn} ctn, get ${s.freeCtn} free` : `Buy ${s.minCtn}+ ctn: ${s.discPct}% off`;
+}
+/** Re-apply discount schemes and regenerate free-goods lines. Hand-typed discounts are kept. */
+export function applySchemes(schemes: Scheme[], lines: Line[], route?: string): Line[] {
+  const active = schemes.filter((s) => schemeActive(s, route));
+  const paid = lines.filter((l) => !l.isFree).map((l): Line => {
+    if (l.manualDisc) return l;
+    if (l.unit !== "ctn") return { ...l, discPct: 0, scheme: undefined };
+    const s = active.filter((x) => x.type === "discount" && x.productId === l.productId && l.qty >= x.minCtn).sort((a, b) => b.discPct - a.discPct)[0];
+    return s ? { ...l, discPct: s.discPct, scheme: schemeLabel(s) } : { ...l, discPct: 0, scheme: undefined };
+  });
+  const free: Line[] = [];
+  for (const l of paid) {
+    if (l.unit !== "ctn") continue;
+    const s = active.filter((x) => x.type === "free" && x.productId === l.productId && l.qty >= x.minCtn).sort((a, b) => b.freeCtn / b.minCtn - a.freeCtn / a.minCtn)[0];
+    if (!s) continue;
+    const n = Math.floor(l.qty / s.minCtn) * s.freeCtn;
+    if (n > 0) free.push({ productId: l.productId, unit: "ctn", qty: n, rate: 0, discPct: 0, isFree: true, scheme: schemeLabel(s) });
+  }
+  return [...paid, ...free];
 }
 
 /* ---------- batches & expiry ---------- */

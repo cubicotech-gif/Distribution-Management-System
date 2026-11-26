@@ -1,11 +1,11 @@
 "use client";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { CUSTOMERS, ORDERS, PAYMENTS, PRODUCTS, PURCHASES, RETURNS, SCHEMES, TRIPS, USERS } from "./seed";
-import { orderDue, orderTotal, pcsOf, totals, unpaidOrders, withScheme } from "./calc";
+import { CUSTOMERS, ORDERS, PAYMENTS, PRICE_LISTS, PRODUCTS, PURCHASES, RETURNS, ROUTES, SCHEMES, SUPPLIERS, TRIPS, USERS } from "./seed";
+import { applySchemes, orderDue, orderTotal, pcsOf, totals, unpaidOrders } from "./calc";
 import type {
   Activity, Allocation, Approval, Customer, Line, Order, OrderStatus, Payment, Product, PurchaseOrder,
-  PriceChange, ProductStatus, ReturnNote, ReturnReason, Role, Scheme, StockAdj, SupplierReturn, Trip, User,
+  ChangeEntry, PriceChange, PriceList, ProductStatus, ReturnNote, ReturnReason, Role, Route, Scheme, StockAdj, Supplier, SupplierReturn, Trip, User,
 } from "./types";
 
 const uid = () => Math.random().toString(36).slice(2, 9);
@@ -61,6 +61,10 @@ const seedState = () => ({
   adjustments: [] as StockAdj[],
   approvals: [] as Approval[],
   priceHistory: [] as PriceChange[],
+  routes: ROUTES.map((r) => ({ ...r })) as Route[],
+  priceLists: PRICE_LISTS.map((l) => ({ ...l, overrides: { ...l.overrides } })) as PriceList[],
+  suppliers: SUPPLIERS.map((x) => ({ ...x })) as Supplier[],
+  changeLog: [] as ChangeEntry[],
   activity: [] as Activity[],
   seq: 43,
 });
@@ -80,6 +84,10 @@ interface State {
   adjustments: StockAdj[];
   approvals: Approval[];
   priceHistory: PriceChange[];
+  routes: Route[];
+  priceLists: PriceList[];
+  suppliers: Supplier[];
+  changeLog: ChangeEntry[];
   activity: Activity[];
   seq: number;
 
@@ -131,7 +139,15 @@ interface State {
   bulkPrice: (ids: string[], pct: number, by: string) => { applied: number; pending: number };
   importProducts: (rows: ImportRow[], by: string) => { added: number; updated: number; pending: number };
   upsertCustomer: (c: Customer) => void;
-  deleteCustomer: (id: string) => void;
+  deleteCustomer: (id: string) => boolean;
+  setCustomerStatus: (ids: string[], status: "active" | "blocked", reason?: string) => void;
+  moveCustomers: (ids: string[], routeName: string) => void;
+  upsertRoute: (r: Route) => void;
+  deleteRoute: (id: string) => boolean;
+  upsertPriceList: (l: PriceList) => void;
+  deletePriceList: (id: string) => boolean;
+  upsertSupplier: (x: Supplier) => void;
+  deleteSupplier: (id: string) => boolean;
   upsertScheme: (s: Scheme) => void;
   deleteScheme: (id: string) => void;
   setBookerTarget: (id: string, target: number) => void;
@@ -141,6 +157,9 @@ export interface NewItem { name: string; brand: string; packSize: number; costPr
 export interface ImportRow { code: string; name?: string; brand?: string; supplier?: string; packSize?: number; cartonPrice?: number; costPrice?: number; reorder?: number; leadDays?: number; bin?: string }
 
 const log = (s: State, text: string): Activity[] => [{ id: uid(), at: Date.now(), text }, ...s.activity].slice(0, 80);
+const aud = (s: State, entity: ChangeEntry["entity"], text: string): ChangeEntry[] => [
+  { id: uid(), at: Date.now(), by: s.users.find((u) => u.id === s.userId)?.initials ?? "—", entity, text }, ...s.changeLog,
+].slice(0, 300);
 const stamp = (o: Order, status: OrderStatus, by: string) => [...o.trail, { status, at: Date.now(), by }];
 
 export const useStore = create<State>()(
@@ -157,7 +176,9 @@ export const useStore = create<State>()(
         const s = get();
         const booker = s.users.find((u) => u.id === bookerId);
         const id = `o${s.seq}`;
-        const priced = lines.map((l) => withScheme(s.schemes, l));
+        const cust = s.customers.find((x) => x.id === customerId);
+        if (cust?.status === "blocked") return "";
+        const priced = applySchemes(s.schemes, lines, cust?.route);
         const o: Order = {
           id, folio: `SO-${1000 + s.seq}`, customerId, bookerId, lines: priced, status: "booked", createdAt: Date.now(),
           trail: [{ status: "booked", at: Date.now(), by: booker?.initials ?? "—" }], paid: 0, note,
@@ -167,7 +188,20 @@ export const useStore = create<State>()(
         return id;
       },
 
-      updateOrderLines: (id, lines) => set((st) => ({ orders: st.orders.map((o) => (o.id === id ? { ...o, lines } : o)) })),
+      updateOrderLines: (id, lines) =>
+        set((st) => {
+          const o = st.orders.find((x) => x.id === id);
+          if (!o) return {};
+          const c = st.customers.find((x) => x.id === o.customerId);
+          const old = o.lines.filter((l) => !l.isFree);
+          const forced = new Set<number>();
+          const prepared = lines.filter((l) => !l.isFree).map((l, i) => {
+            if (old[i] && old[i].qty === l.qty && old[i].unit === l.unit && !l.manualDisc) { forced.add(i); return { ...l, manualDisc: true }; }
+            return l;
+          });
+          const res = applySchemes(st.schemes, prepared, c?.route).map((l, i) => (forced.has(i) && !l.isFree ? { ...l, manualDisc: undefined } : l));
+          return { orders: st.orders.map((x) => (x.id === id ? { ...x, lines: res } : x)) };
+        }),
 
       approveOrder: (id, by, ownerOverride = false) => {
         const s = get();
@@ -390,7 +424,7 @@ export const useStore = create<State>()(
       createPO: (supplier, lines, newItems = []) => {
         const s = get();
         const created: Product[] = newItems.map((n, i) => ({
-          id: `p${uid()}`, status: "unlisted", code: `NEW-${s.products.length + i + 1}`, name: n.name, brand: n.brand || supplier.split(" ")[0],
+          id: `p${uid()}`, status: "unlisted", category: "General", barcode: "", code: `NEW-${s.products.length + i + 1}`, name: n.name, brand: n.brand || supplier.split(" ")[0],
           supplier, packSize: n.packSize, cartonPrice: 0, costPrice: n.costPrice, taxPct: 18, stock: 0, batches: [], damaged: 0, reserved: 0,
           reorder: n.packSize * 5, leadDays: 5, bin: "", hue: Math.floor(Math.random() * 360),
         }));
@@ -484,21 +518,21 @@ export const useStore = create<State>()(
         const s = get();
         const old = s.products.find((x) => x.id === p.id);
         if (!old) {
-          set({ products: [{ ...p, cartonPrice: 0 }, ...s.products] });
+          set({ products: [{ ...p, cartonPrice: 0 }, ...s.products], changeLog: aud(s, "product", `Added product ${p.name} (${p.code})`) });
           if (p.cartonPrice > 0) get().applyPrices([{ productId: p.id, newPrice: p.cartonPrice }], by, "Listed");
           return;
         }
         const { cartonPrice: newPrice, ...rest } = p;
-        set({ products: s.products.map((x) => (x.id === p.id ? { ...x, ...rest, batches: x.batches, stock: x.stock, damaged: x.damaged, reserved: x.reserved } : x)) });
+        set({ products: s.products.map((x) => (x.id === p.id ? { ...x, ...rest, batches: x.batches, stock: x.stock, damaged: x.damaged, reserved: x.reserved } : x)), changeLog: aud(s, "product", `Edited ${p.name}`) });
         if (newPrice !== old.cartonPrice) get().applyPrices([{ productId: p.id, newPrice }], by, old.cartonPrice === 0 ? "Listed" : "Edited");
       },
-      setProductStatus: (id, status) => set((s) => ({ products: s.products.map((x) => (x.id === id ? { ...x, status } : x)) })),
+      setProductStatus: (id, status) => set((s) => ({ products: s.products.map((x) => (x.id === id ? { ...x, status } : x)), changeLog: aud(s, "product", `${s.products.find((x) => x.id === id)?.name} set to ${status}`) })),
       deleteProduct: (id) => {
         const s = get();
         const p = s.products.find((x) => x.id === id);
         const used = !!p && (p.stock > 0 || p.damaged > 0 || s.orders.some((o) => o.lines.some((l) => l.productId === id)) || s.purchases.some((o) => o.lines.some((l) => l.productId === id)));
         if (!p || used) return false;
-        set({ products: s.products.filter((x) => x.id !== id), schemes: s.schemes.filter((x) => x.productId !== id) });
+        set({ products: s.products.filter((x) => x.id !== id), schemes: s.schemes.filter((x) => x.productId !== id), changeLog: aud(s, "product", `Deleted product ${p.name}`) });
         return true;
       },
       applyPrices: (changes, by, note) => {
@@ -555,7 +589,7 @@ export const useStore = create<State>()(
             added++;
             const id = `p${uid()}`;
             products = [{
-              id, status: (r.cartonPrice ?? 0) > 0 ? "active" : "unlisted", code: r.code, name: r.name || r.code, brand: r.brand || "", supplier: r.supplier || "",
+              id, status: (r.cartonPrice ?? 0) > 0 ? "active" : "unlisted", category: "General", barcode: "", code: r.code, name: r.name || r.code, brand: r.brand || "", supplier: r.supplier || "",
               packSize: r.packSize || 12, cartonPrice: 0, costPrice: r.costPrice ?? 0, taxPct: 18, stock: 0, batches: [], damaged: 0, reserved: 0,
               reorder: r.reorder ?? 120, leadDays: r.leadDays ?? 5, bin: r.bin ?? "", hue: Math.floor(Math.random() * 360),
             }, ...products];
@@ -567,13 +601,91 @@ export const useStore = create<State>()(
         set((st) => ({ activity: log(st, `${by} imported products: ${added} new, ${updated} updated`) }));
         return { added, updated, pending: res.pending };
       },
-      upsertCustomer: (c) => set((s) => ({ customers: s.customers.some((x) => x.id === c.id) ? s.customers.map((x) => (x.id === c.id ? c : x)) : [c, ...s.customers] })),
-      deleteCustomer: (id) => set((s) => ({ customers: s.customers.filter((x) => x.id !== id) })),
-      upsertScheme: (sc) => set((s) => ({ schemes: s.schemes.some((x) => x.id === sc.id) ? s.schemes.map((x) => (x.id === sc.id ? sc : x)) : [sc, ...s.schemes] })),
-      deleteScheme: (id) => set((s) => ({ schemes: s.schemes.filter((x) => x.id !== id) })),
+      upsertCustomer: (c) =>
+        set((s) => {
+          const rt = s.routes.find((r) => r.name === c.route);
+          const n = { ...c, bookerId: rt?.bookerId ?? c.bookerId };
+          const exists = s.customers.some((x) => x.id === c.id);
+          return {
+            customers: exists ? s.customers.map((x) => (x.id === c.id ? n : x)) : [n, ...s.customers],
+            changeLog: aud(s, "customer", `${exists ? "Edited" : "Added"} customer ${c.name}`),
+          };
+        }),
+      deleteCustomer: (id) => {
+        const s = get();
+        const c = s.customers.find((x) => x.id === id);
+        if (!c || c.balance > 0 || s.orders.some((o) => o.customerId === id)) return false;
+        set({ customers: s.customers.filter((x) => x.id !== id), changeLog: aud(s, "customer", `Deleted customer ${c.name}`) });
+        return true;
+      },
+      setCustomerStatus: (ids, status, reason) =>
+        set((s) => ({
+          customers: s.customers.map((c) => (ids.includes(c.id) ? { ...c, status, blockedReason: status === "blocked" ? reason || "Blocked by back office" : undefined } : c)),
+          changeLog: aud(s, "customer", `${status === "blocked" ? "Blocked" : "Unblocked"} ${ids.length} customer${ids.length > 1 ? "s" : ""}${reason ? ` (${reason})` : ""}`),
+        })),
+      moveCustomers: (ids, routeName) =>
+        set((s) => {
+          const rt = s.routes.find((r) => r.name === routeName);
+          if (!rt) return {};
+          return {
+            customers: s.customers.map((c) => (ids.includes(c.id) ? { ...c, route: rt.name, bookerId: rt.bookerId } : c)),
+            changeLog: aud(s, "route", `Moved ${ids.length} customer${ids.length > 1 ? "s" : ""} to ${rt.name}`),
+          };
+        }),
+      upsertRoute: (r) =>
+        set((s) => {
+          const old = s.routes.find((x) => x.id === r.id);
+          const customers = s.customers.map((c) => (c.route === (old?.name ?? r.name) ? { ...c, route: r.name, bookerId: r.bookerId } : c));
+          return {
+            routes: old ? s.routes.map((x) => (x.id === r.id ? r : x)) : [...s.routes, r],
+            customers,
+            changeLog: aud(s, "route", `${old ? "Edited" : "Added"} route ${r.name}`),
+          };
+        }),
+      deleteRoute: (id) => {
+        const s = get();
+        const r = s.routes.find((x) => x.id === id);
+        if (!r || s.customers.some((c) => c.route === r.name)) return false;
+        set({ routes: s.routes.filter((x) => x.id !== id), changeLog: aud(s, "route", `Deleted route ${r.name}`) });
+        return true;
+      },
+      upsertPriceList: (l) =>
+        set((s) => ({
+          priceLists: s.priceLists.some((x) => x.id === l.id) ? s.priceLists.map((x) => (x.id === l.id ? l : x)) : [...s.priceLists, l],
+          changeLog: aud(s, "price list", `Saved price list ${l.name} (${l.adjustPct > 0 ? "+" : ""}${l.adjustPct}%, ${Object.keys(l.overrides).length} overrides)`),
+        })),
+      deletePriceList: (id) => {
+        const s = get();
+        const l = s.priceLists.find((x) => x.id === id);
+        if (!l || id === "pl1" || s.customers.some((c) => c.priceListId === id)) return false;
+        set({ priceLists: s.priceLists.filter((x) => x.id !== id), changeLog: aud(s, "price list", `Deleted price list ${l.name}`) });
+        return true;
+      },
+      upsertSupplier: (x) =>
+        set((s) => {
+          const old = s.suppliers.find((y) => y.id === x.id);
+          return {
+            suppliers: old ? s.suppliers.map((y) => (y.id === x.id ? x : y)) : [...s.suppliers, x],
+            products: s.products.map((p) => (p.supplier === (old?.name ?? x.name) ? { ...p, supplier: x.name, leadDays: x.leadDays } : p)),
+            changeLog: aud(s, "supplier", `${old ? "Edited" : "Added"} supplier ${x.name}`),
+          };
+        }),
+      deleteSupplier: (id) => {
+        const s = get();
+        const x = s.suppliers.find((y) => y.id === id);
+        if (!x || s.products.some((p) => p.supplier === x.name)) return false;
+        set({ suppliers: s.suppliers.filter((y) => y.id !== id), changeLog: aud(s, "supplier", `Deleted supplier ${x.name}`) });
+        return true;
+      },
+      upsertScheme: (sc) =>
+        set((s) => ({
+          schemes: s.schemes.some((x) => x.id === sc.id) ? s.schemes.map((x) => (x.id === sc.id ? sc : x)) : [sc, ...s.schemes],
+          changeLog: aud(s, "scheme", `Saved scheme on ${s.products.find((p) => p.id === sc.productId)?.name}`),
+        })),
+      deleteScheme: (id) => set((s) => ({ schemes: s.schemes.filter((x) => x.id !== id), changeLog: aud(s, "scheme", "Deleted a scheme") })),
       setBookerTarget: (id, target) => set((s) => ({ users: s.users.map((u) => (u.id === id ? { ...u, target } : u)) })),
     }),
-    { name: "zarie-dms-v3", version: 3 }
+    { name: "zarie-dms-v4", version: 4 }
   )
 );
 

@@ -1,4 +1,4 @@
-import type { Customer, Order, Payment, Product, PurchaseOrder, User, Line, OrderStatus, Stamp, ReturnNote, Scheme, Trip } from "./types";
+import type { Customer, Order, Payment, PriceList, Product, PurchaseOrder, User, Line, OrderStatus, Stamp, ReturnNote, Route, Scheme, Supplier, Trip } from "./types";
 
 export const USERS: User[] = [
   { id: "u-admin", name: "Zarie Khan", initials: "ZK", role: "admin", title: "Owner" },
@@ -16,7 +16,7 @@ type B = [string, string, number]; // batch no, expiry, cartons
 const P = (
   id: string, code: string, name: string, brand: string, supplier: string, packSize: number, cartonPrice: number,
   costPct: number, batches: B[], reorderCtn: number, hue: number, bin: string, leadDays: number
-): Product => {
+): Omit<Product, "category" | "barcode"> => {
   const bs = batches.map(([no, expiry, ctn], i) => ({ id: `${id}-b${i}`, no, expiry, qty: ctn * packSize }));
   return {
     id, status: "active", code, name, brand, supplier, packSize, cartonPrice, costPrice: Math.round(cartonPrice * costPct),
@@ -25,7 +25,7 @@ const P = (
   };
 };
 
-export const PRODUCTS: Product[] = [
+const RAW_PRODUCTS: Omit<Product, "category" | "barcode">[] = [
   P("p1", "SE-01", "Surf Excel 1kg", "Unilever", "Unilever Pakistan", 12, 8500, 0.86, [["SE2603", "2027-03", 12], ["SE2606", "2027-06", 30]], 20, 215, "A-01", 5),
   P("p2", "LX-04", "Lux Soap 100g", "Unilever", "Unilever Pakistan", 72, 5200, 0.84, [["LX2701", "2028-01", 140]], 40, 330, "A-02", 5),
   P("p3", "VM-02", "Vim Bar Regular 100g", "Unilever", "Unilever Pakistan", 48, 4200, 0.85, [["VM2609", "2027-09", 12]], 15, 140, "A-03", 5),
@@ -41,10 +41,19 @@ export const PRODUCTS: Product[] = [
   P("p12", "SG-14", "Shield Dish Wash 500ml", "Shield", "Shield Chemicals", 12, 4800, 0.86, [["SG2708", "2027-08", 22]], 8, 160, "A-06", 7),
 ];
 
+const CAT: Record<string, string> = {
+  p1: "Detergents & cleaning", p3: "Detergents & cleaning", p12: "Detergents & cleaning",
+  p2: "Soap & personal care", p8: "Soap & personal care", p9: "Soap & personal care",
+  p4: "Tea & beverages", p5: "Tea & beverages", p7: "Tea & beverages",
+  p6: "Cooking oil & staples", p10: "Cooking oil & staples",
+  p11: "Snacks & biscuits", p13: "Snacks & biscuits",
+};
+export const PRODUCTS: Product[] = RAW_PRODUCTS.map((p, i) => ({ ...p, category: CAT[p.id] ?? "General", barcode: `896400${String(1000 + i * 37).padStart(6, "0")}` }));
+
 const C = (
   id: string, name: string, area: string, route: string, bookerId: string, type: "credit" | "cash",
-  creditLimit: number, creditDays: number, balance: number, oldestDue: number, phone: string
-): Customer => ({ id, name, area, route, bookerId, type, creditLimit, creditDays, balance, oldestDue, phone });
+  creditLimit: number, creditDays: number, balance: number, oldestDue: number, phone: string, priceListId = "pl1"
+): Customer => ({ id, name, area, route, bookerId, type, status: "active", priceListId, creditLimit, creditDays, balance, oldestDue, phone });
 
 export const CUSTOMERS: Customer[] = [
   C("c1", "Ali General Store", "Anarkali", "Anarkali #4", "u-b1", "credit", 250000, 15, 184000, 12, "0300-4455120"),
@@ -53,10 +62,10 @@ export const CUSTOMERS: Customer[] = [
   C("c4", "Bismillah Karyana Store", "Mozang", "Mozang #2", "u-b2", "credit", 120000, 10, 29400, 4, "0345-2200981"),
   C("c5", "Ghazi Provision Store", "Mozang", "Mozang #2", "u-b2", "credit", 150000, 15, 112000, 18, "0300-9087761"),
   C("c6", "Bilal & Sons", "Mozang", "Mozang #2", "u-b2", "credit", 180000, 15, 68900, 9, "0322-5543210"),
-  C("c7", "Noor Mart", "Gulberg", "Gulberg #1", "u-b3", "credit", 400000, 30, 212000, 22, "0301-6677889"),
-  C("c8", "Fresh Corner", "Gulberg", "Gulberg #1", "u-b3", "cash", 0, 0, 0, 0, "0333-4412090"),
-  C("c9", "Hamza Super Store", "Model Town", "Model Town #3", "u-b3", "credit", 220000, 15, 96500, 11, "0312-8800761"),
-  C("c10", "City Kiryana", "Model Town", "Model Town #3", "u-b1", "cash", 0, 0, 0, 0, "0345-1122334"),
+  C("c7", "Noor Mart", "Gulberg", "Gulberg #1", "u-b3", "credit", 400000, 30, 212000, 22, "0301-6677889", "pl2"),
+  C("c8", "Fresh Corner", "Gulberg", "Gulberg #1", "u-b3", "cash", 0, 0, 0, 0, "0333-4412090", "pl3"),
+  C("c9", "Hamza Super Store", "Model Town", "Model Town #3", "u-b3", "credit", 220000, 15, 96500, 11, "0312-8800761", "pl2"),
+  C("c10", "City Kiryana", "Model Town", "Model Town #3", "u-b3", "cash", 0, 0, 0, 0, "0345-1122334", "pl3"),
 ];
 
 const h = 3600_000;
@@ -114,11 +123,37 @@ export const PURCHASES: PurchaseOrder[] = [
 export const PAYMENTS: Payment[] = [];
 
 export const SCHEMES: Scheme[] = [
-  { id: "s1", productId: "p1", minCtn: 10, discPct: 2 },
-  { id: "s2", productId: "p2", minCtn: 5, discPct: 1.5 },
-  { id: "s3", productId: "p7", minCtn: 10, discPct: 3 },
-  { id: "s4", productId: "p11", minCtn: 8, discPct: 2.5 },
-  { id: "s5", productId: "p8", minCtn: 6, discPct: 1 },
+  { id: "s1", productId: "p1", type: "discount", minCtn: 10, discPct: 2, freeCtn: 0 },
+  { id: "s2", productId: "p2", type: "discount", minCtn: 5, discPct: 1.5, freeCtn: 0 },
+  { id: "s3", productId: "p7", type: "discount", minCtn: 10, discPct: 3, freeCtn: 0, to: "2026-12-31" },
+  { id: "s4", productId: "p11", type: "discount", minCtn: 8, discPct: 2.5, freeCtn: 0 },
+  { id: "s5", productId: "p8", type: "discount", minCtn: 6, discPct: 1, freeCtn: 0 },
+  { id: "s6", productId: "p6", type: "free", minCtn: 10, discPct: 0, freeCtn: 1 },
+];
+
+export const ROUTES: Route[] = [
+  { id: "rt1", name: "Anarkali #4", bookerId: "u-b1", days: ["Mon", "Wed", "Fri"] },
+  { id: "rt2", name: "Mozang #2", bookerId: "u-b2", days: ["Tue", "Thu", "Sat"] },
+  { id: "rt3", name: "Gulberg #1", bookerId: "u-b3", days: ["Mon", "Thu"] },
+  { id: "rt4", name: "Model Town #3", bookerId: "u-b3", days: ["Wed", "Sat"] },
+];
+
+export const PRICE_LISTS: PriceList[] = [
+  { id: "pl1", name: "Standard", adjustPct: 0, overrides: {} },
+  { id: "pl2", name: "Wholesale", adjustPct: -2, overrides: {} },
+  { id: "pl3", name: "Retail", adjustPct: 3, overrides: {} },
+];
+
+export const SUPPLIERS: Supplier[] = [
+  { id: "sp1", name: "Unilever Pakistan", contact: "Hassan Raza", phone: "042-111-222-333", terms: "Net 15", leadDays: 5 },
+  { id: "sp2", name: "Tapal Tea Ltd", contact: "Faisal Ahmed", phone: "021-3456-7890", terms: "Net 7", leadDays: 7 },
+  { id: "sp3", name: "Dalda Foods", contact: "Nadia Khan", phone: "021-3567-1122", terms: "Net 15", leadDays: 6 },
+  { id: "sp4", name: "Nestle Pakistan", contact: "Omar Sheikh", phone: "042-3577-0000", terms: "Net 30", leadDays: 4 },
+  { id: "sp5", name: "Colgate-Palmolive", contact: "Sana Iqbal", phone: "021-3250-1111", terms: "Net 21", leadDays: 6 },
+  { id: "sp6", name: "Rafhan Maize", contact: "Tariq Mehmood", phone: "042-3542-2200", terms: "Net 15", leadDays: 6 },
+  { id: "sp7", name: "Meezan Foods", contact: "Bilal Siddiqui", phone: "042-3588-4400", terms: "Net 7", leadDays: 4 },
+  { id: "sp8", name: "Shield Chemicals", contact: "Rabia Anwar", phone: "042-3599-1000", terms: "Net 7", leadDays: 7 },
+  { id: "sp9", name: "PepsiCo Pakistan", contact: "Danish Lodhi", phone: "042-3500-7788", terms: "Net 21", leadDays: 5 },
 ];
 
 export const TRIPS: Trip[] = [

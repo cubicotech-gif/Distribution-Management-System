@@ -68,6 +68,7 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+@layer components {
 .num { font-family: var(--font-jbmono), ui-monospace, monospace; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); }
 .th { font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); }
@@ -97,6 +98,8 @@ body {
 
 .row-sel { background: var(--accent-wash); box-shadow: inset 3px 0 0 var(--accent); }
 .row-hover:hover { background: var(--panel-2); }
+
+}
 
 @keyframes slidein { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
 .slidein { animation: slidein .22s ease-out; }

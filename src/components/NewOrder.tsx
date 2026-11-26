@@ -2,11 +2,11 @@
 import { useMemo, useState } from "react";
 import { Trash2, ClipboardPaste, Sparkles } from "lucide-react";
 import { useStore, useUser } from "@/lib/store";
-import { available, fmt, lineNet, rateFor, totals, withScheme } from "@/lib/calc";
-import type { Line, Product, Unit } from "@/lib/types";
+import { applySchemes, available, fmt, lineNet, totals, unitRate } from "@/lib/calc";
+import type { Customer, Line, PriceList, Product, Unit } from "@/lib/types";
 import { Kbd, Modal, Thumb, toast } from "./ui";
 
-function parsePaste(text: string, products: Product[]): { lines: Line[]; missed: string[] } {
+function parsePaste(text: string, products: Product[], c: Customer | undefined, lists: PriceList[]): { lines: Line[]; missed: string[] } {
   const lines: Line[] = [];
   const missed: string[] = [];
   for (const raw of text.split(/[\n,;]+/).map((s) => s.trim()).filter(Boolean)) {
@@ -21,7 +21,7 @@ function parsePaste(text: string, products: Product[]): { lines: Line[]; missed:
       const score = words.reduce((s, w) => s + (hay.includes(w) ? w.length : 0), 0);
       if (score > bestScore) { best = p; bestScore = score; }
     }
-    if (best && bestScore >= 3) lines.push({ productId: best.id, unit, qty, rate: rateFor(best, unit), discPct: 0 });
+    if (best && bestScore >= 3) lines.push({ productId: best.id, unit, qty, rate: unitRate(best, unit, c, lists), discPct: 0 });
     else missed.push(raw);
   }
   return { lines, missed };
@@ -34,13 +34,14 @@ export default function NewOrder({ onClose, onCreated, defaultCustomer }: { onCl
   const orders = useStore((s) => s.orders);
   const create = useStore((s) => s.createOrder);
   const schemes = useStore((s) => s.schemes);
+  const lists = useStore((s) => s.priceLists);
   const user = useUser();
   const [cid, setCid] = useState(defaultCustomer ?? customers[0]?.id);
   const [lines, setLines] = useState<Line[]>([]);
   const [paste, setPaste] = useState("");
   const [q, setQ] = useState("");
   const c = customers.find((x) => x.id === cid);
-  const priced = lines.map((l) => withScheme(schemes, l));
+  const priced = applySchemes(schemes, lines, c?.route);
   const t = totals(priced);
 
   const matches = useMemo(() => {
@@ -54,12 +55,12 @@ export default function NewOrder({ onClose, onCreated, defaultCustomer }: { onCl
     setLines((ls) => {
       const i = ls.findIndex((l) => l.productId === p.id && l.unit === unit);
       if (i >= 0) return ls.map((l, k) => (k === i ? { ...l, qty: l.qty + qty } : l));
-      return [...ls, { productId: p.id, unit, qty, rate: rateFor(p, unit), discPct: 0 }];
+      return [...ls, { productId: p.id, unit, qty, rate: unitRate(p, unit, c, lists), discPct: 0 }];
     });
     setQ("");
   };
   const submit = () => {
-    if (!cid || lines.length === 0) return;
+    if (!cid || lines.length === 0 || c?.status === "blocked") return;
     const id = create(cid, lines.filter((l) => l.qty > 0), c?.bookerId ?? user?.id ?? "u-b1");
     toast("Order booked and sent to the approval queue");
     onCreated(id);
@@ -74,16 +75,17 @@ export default function NewOrder({ onClose, onCreated, defaultCustomer }: { onCl
         <div className="grid grid-cols-[1fr_auto] items-end gap-3">
           <div>
             <div className="th mb-1">Customer</div>
-            <select className="field" value={cid} onChange={(e) => setCid(e.target.value)} autoFocus>
-              {customers.map((x) => <option key={x.id} value={x.id}>{x.name} · {x.area}</option>)}
+            <select className="field" value={cid} onChange={(e) => { setCid(e.target.value); const nc = customers.find((x) => x.id === e.target.value); setLines((ls) => ls.map((l) => { const pr = allProducts.find((p) => p.id === l.productId); return pr ? { ...l, rate: unitRate(pr, l.unit, nc, lists) } : l; })); }} autoFocus>
+              {customers.map((x) => <option key={x.id} value={x.id}>{x.name} · {x.area}{x.status === "blocked" ? " (BLOCKED)" : ""}</option>)}
             </select>
           </div>
           {lastOrder && (
-            <button className="btn" onClick={() => setLines(lastOrder.lines.map((l) => ({ ...l, pickedQty: undefined })))}>
+            <button className="btn" onClick={() => setLines(lastOrder.lines.filter((l) => !l.isFree).map((l) => { const pr = allProducts.find((p) => p.id === l.productId); return { ...l, pickedQty: undefined, manualDisc: undefined, rate: pr ? unitRate(pr, l.unit, c, lists) : l.rate }; }))}>
               <Sparkles size={14} /> Repeat last order
             </button>
           )}
         </div>
+        {c?.status === "blocked" && <div className="rounded-xl border border-[var(--bad-fg)] bg-[var(--bad-bg)] px-3 py-2 text-xs font-semibold text-[var(--bad-fg)]">This customer is blocked: {c.blockedReason}. New orders cannot be booked.</div>}
         {c && <div className="text-xs text-ink2">Balance <span className="num font-semibold text-ink">Rs. {fmt(c.balance)}</span>{c.type === "credit" && <> of limit <span className="num">{fmt(c.creditLimit)}</span></>}</div>}
 
         <div className="rounded-xl border border-dashed border-line2 bg-panel2 p-3">
@@ -91,7 +93,7 @@ export default function NewOrder({ onClose, onCreated, defaultCustomer }: { onCl
           <div className="flex gap-2">
             <textarea className="field h-[58px] resize-none py-1.5" placeholder={"5 ctn surf, 2 ctn lux\n10 pcs vim"} value={paste} onChange={(e) => setPaste(e.target.value)} />
             <button className="btn self-end" onClick={() => {
-              const r = parsePaste(paste, products);
+              const r = parsePaste(paste, products, c, lists);
               setLines((ls) => [...ls, ...r.lines]);
               setPaste("");
               toast(r.missed.length ? `Added ${r.lines.length}. Couldn't match: ${r.missed.join(", ")}` : `Added ${r.lines.length} lines`);
@@ -127,7 +129,7 @@ export default function NewOrder({ onClose, onCreated, defaultCustomer }: { onCl
                     <tr key={i} className="border-t border-line">
                       <td className="px-3 py-1.5"><div className="flex items-center gap-2"><Thumb p={p} size={22} /><div>{p.name}{priced[i].scheme && <div className="text-[10.5px] font-medium text-accent">{priced[i].scheme}</div>}</div></div></td>
                       <td>
-                        <select className="cell !text-left" value={l.unit} onChange={(e) => { const u = e.target.value as Unit; setLines(lines.map((x, k) => k === i ? { ...x, unit: u, rate: rateFor(p, u) } : x)); }}>
+                        <select className="cell !text-left" value={l.unit} onChange={(e) => { const u = e.target.value as Unit; setLines(lines.map((x, k) => k === i ? { ...x, unit: u, rate: unitRate(p, u, c, lists) } : x)); }}>
                           <option value="ctn">Carton</option><option value="pcs">Pcs</option>
                         </select>
                       </td>
@@ -138,6 +140,8 @@ export default function NewOrder({ onClose, onCreated, defaultCustomer }: { onCl
                     </tr>
                   );
                 })}
+                {priced.filter((l) => l.isFree).map((l, i) => { const p = allProducts.find((x) => x.id === l.productId)!; return (
+                  <tr key={`f${i}`} className="border-t border-line bg-accentwash"><td className="px-3 py-1.5"><div className="flex items-center gap-2"><Thumb p={p} size={22} /><div>{p.name}<div className="text-[10.5px] font-medium text-accent">{l.scheme}</div></div></div></td><td className="uppercase text-ink2">{l.unit}</td><td className="num pr-3 text-right font-semibold">{l.qty}</td><td className="num text-right text-ink3">—</td><td className="text-right"><span className="chip chip-info">FREE</span></td><td /></tr>); })}
               </tbody>
             </table>
           )}
@@ -147,7 +151,7 @@ export default function NewOrder({ onClose, onCreated, defaultCustomer }: { onCl
           <div className="text-xs text-ink2">Tax 18% included in total · <span className="num">{lines.length}</span> items</div>
           <div className="flex items-center gap-4">
             <div className="num text-[20px] font-bold text-accent">Rs. {fmt(t.total)}</div>
-            <button className="btn btn-primary h-9" disabled={!lines.length} onClick={submit}>Book order <Kbd>Ctrl</Kbd><Kbd>↵</Kbd></button>
+            <button className="btn btn-primary h-9" disabled={!lines.length || c?.status === "blocked"} onClick={submit}>Book order <Kbd>Ctrl</Kbd><Kbd>↵</Kbd></button>
           </div>
         </div>
       </div>

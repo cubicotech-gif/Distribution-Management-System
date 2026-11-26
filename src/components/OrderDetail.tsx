@@ -2,7 +2,7 @@
 import { Check, Printer } from "lucide-react";
 import { useState } from "react";
 import { useStore, useUser } from "@/lib/store";
-import { ago, available, clock, fmt, lineNet, money, orderTotal, pcsOf, STEPS, STEP_LABEL, totals, withScheme } from "@/lib/calc";
+import { ago, available, clock, fmt, lineNet, money, orderTotal, pcsOf, STEPS, STEP_LABEL, totals } from "@/lib/calc";
 import { checkOrder } from "@/lib/check";
 import type { Order, ReturnReason } from "@/lib/types";
 import { AgingBar, Avatar, CreditMeter, Kbd, Modal, StatusChip, Thumb, toast } from "./ui";
@@ -139,7 +139,6 @@ export default function OrderDetail({ o, primary }: { o: Order; primary?: { labe
   const customers = useStore((s) => s.customers);
   const products = useStore((s) => s.products);
   const updateLines = useStore((s) => s.updateOrderLines);
-  const schemes = useStore((s) => s.schemes);
   const hold = useStore((s) => s.holdOrder);
   const cancel = useStore((s) => s.cancelOrder);
   const user = useUser();
@@ -154,11 +153,7 @@ export default function OrderDetail({ o, primary }: { o: Order; primary?: { labe
   const by = user?.initials ?? "—";
 
   const setLine = (i: number, patch: Partial<Order["lines"][number]>) =>
-    updateLines(o.id, o.lines.map((l, k) => {
-      if (k !== i) return l;
-      const n = { ...l, ...patch };
-      return "qty" in patch ? { ...withScheme(schemes, n), discPct: patch.discPct ?? withScheme(schemes, n).discPct } : n;
-    }));
+    updateLines(o.id, o.lines.map((l, k) => (k === i ? { ...l, ...patch, ...("discPct" in patch ? { manualDisc: true } : {}) } : l)));
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -221,6 +216,14 @@ export default function OrderDetail({ o, primary }: { o: Order; primary?: { labe
               const p = products.find((x) => x.id === l.productId)!;
               const sh = chk.short.find((s) => s.i === i);
               const avCtn = Math.floor(available(p) / (l.unit === "ctn" ? p.packSize : 1));
+              if (l.isFree) return (
+                <tr key={i} className="border-t border-line bg-accentwash">
+                  <td className="num py-1.5 text-ink2">{p.code}</td>
+                  <td><div className="flex items-center gap-2"><Thumb p={p} size={24} /><div><div className="font-medium">{p.name}</div><div className="text-[10.5px] font-medium text-accent">{l.scheme}</div></div></div></td>
+                  <td className="uppercase text-ink2">{l.unit}</td><td className="num text-right font-semibold">{l.qty}</td><td />
+                  <td className="num text-right text-ink3">—</td><td /><td className="text-right"><span className="chip chip-info">FREE</span></td>
+                </tr>
+              );
               return (
                 <tr key={i} className="border-t border-line">
                   <td className="num py-1.5 text-ink2">{p.code}</td>

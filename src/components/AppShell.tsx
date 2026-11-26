@@ -4,7 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ClipboardList, FileText, Truck, Boxes, Users, Wallet, PackageCheck, LayoutGrid, Package, Search,
-  Moon, Sun, LogOut, Command, RotateCcw, Plus, ArrowRight, ShieldCheck, BarChart3, UserCog, Landmark, Route, Undo2, Gauge,
+  Moon, Sun, LogOut, Command, RotateCcw, Plus, ArrowRight, ShieldCheck, BarChart3, UserCog, Landmark, Route, Undo2, Gauge, MapPinned, Building2, History,
 } from "lucide-react";
 import { HOME, useStore, useUser } from "@/lib/store";
 import type { Role } from "@/lib/types";
@@ -24,7 +24,9 @@ const NAV: Nav[] = [
   { href: "/recovery", label: "Recovery", icon: Wallet, roles: ["sales"] },
   { href: "/settlements", label: "Trip settlement", icon: Landmark, roles: ["sales"], badge: "settle" },
   { href: "/customers", label: "Customers", icon: Users, roles: ["admin", "sales"] },
-  { href: "/products", label: "Products & prices", icon: Package, roles: ["sales"] },
+  { href: "/routes", label: "Routes", icon: MapPinned, roles: ["sales", "admin"] },
+  { href: "/products", label: "Catalog & prices", icon: Package, roles: ["sales"] },
+  { href: "/changelog", label: "Change log", icon: History, roles: ["sales", "admin"] },
   // Warehouse
   { href: "/receiving", label: "Inbound (GRN)", icon: PackageCheck, roles: ["warehouse"], badge: "receive" },
   { href: "/pick", label: "Pick & challan", icon: Truck, roles: ["warehouse"], badge: "pick" },
@@ -34,6 +36,7 @@ const NAV: Nav[] = [
   { href: "/planner", label: "Reorder planner", icon: Gauge, roles: ["purchasing"], badge: "plan" },
   { href: "/receiving", label: "Orders & GRN", icon: PackageCheck, roles: ["purchasing"], badge: "receive" },
   { href: "/supplier-returns", label: "Supplier returns", icon: Undo2, roles: ["purchasing"] },
+  { href: "/suppliers", label: "Suppliers", icon: Building2, roles: ["purchasing", "admin"] },
   { href: "/stock", label: "Stock", icon: Boxes, roles: ["admin", "sales", "warehouse", "purchasing"] },
 ];
 

@@ -31,18 +31,56 @@ export function Avatar({ initials, size = 24, tone = 0 }: { initials: string; si
   );
 }
 
-export function Thumb({ p, size = 28 }: { p: Pick<Product, "hue" | "brand">; size?: number }) {
+export function Thumb({ p, size = 28 }: { p: Pick<Product, "hue" | "brand"> & { image?: string }; size?: number }) {
+  if (p.image)
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={p.image} alt="" className="shrink-0 rounded-lg object-cover" style={{ width: size, height: size }} />;
   return (
     <span
       className="inline-flex shrink-0 items-center justify-center rounded-lg text-[10px] font-bold"
       style={{
-        width: size, height: size,
+        width: size, height: size, fontSize: Math.max(9, size * 0.34),
         background: `linear-gradient(135deg, hsl(${p.hue} 70% 62%), hsl(${p.hue} 65% 46%))`,
         color: "white",
       }}
     >
       {p.brand.slice(0, 2).toUpperCase()}
     </span>
+  );
+}
+
+export type ViewMode = "table" | "tiles" | "compact";
+export function useViewMode(key: string, def: ViewMode = "table"): [ViewMode, (m: ViewMode) => void] {
+  const [m, setM] = useState<ViewMode>(def);
+  useEffect(() => {
+    try { const v = localStorage.getItem("view:" + key) as ViewMode | null; if (v) setM(v); } catch {}
+  }, [key]);
+  return [m, (v) => { setM(v); try { localStorage.setItem("view:" + key, v); } catch {} }];
+}
+export function ViewSwitch({ mode, onChange }: { mode: ViewMode; onChange: (m: ViewMode) => void }) {
+  const items: [ViewMode, string, React.ReactNode][] = [
+    ["table", "Detailed list", <svg key="t" width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6"><rect x="1.5" y="2.5" width="13" height="11" rx="2" /><path d="M1.5 6.5h13M6 6.5v7" /></svg>],
+    ["tiles", "Tiles", <svg key="g" width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6"><rect x="1.5" y="1.5" width="5" height="5" rx="1.2" /><rect x="9.5" y="1.5" width="5" height="5" rx="1.2" /><rect x="1.5" y="9.5" width="5" height="5" rx="1.2" /><rect x="9.5" y="9.5" width="5" height="5" rx="1.2" /></svg>],
+    ["compact", "Compact list", <svg key="c" width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"><path d="M2 3.5h12M2 6.5h12M2 9.5h12M2 12.5h12" /></svg>],
+  ];
+  return (
+    <div className="flex rounded-xl border border-line bg-panel p-0.5">
+      {items.map(([k, label, icon]) => (
+        <button key={k} title={label} onClick={() => onChange(k)} className={`grid h-7 w-8 place-items-center rounded-lg transition-colors ${mode === k ? "bg-accent text-accentink" : "text-ink2 hover:bg-panel2"}`}>{icon}</button>
+      ))}
+    </div>
+  );
+}
+
+export function Chips<T extends string>({ items, value, onChange }: { items: { k: T; label: string; count?: number }[]; value: T; onChange: (v: T) => void }) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {items.map((i) => (
+        <button key={i.k} onClick={() => onChange(i.k)} className={`flex h-7 items-center gap-1.5 rounded-full border px-3 text-[12px] font-semibold transition-colors ${value === i.k ? "border-accent bg-accentsoft text-accent" : "border-line bg-panel text-ink2 hover:border-line2"}`}>
+          {i.label}{i.count !== undefined && <span className="num text-[10.5px] opacity-70">{i.count}</span>}
+        </button>
+      ))}
+    </div>
   );
 }
 

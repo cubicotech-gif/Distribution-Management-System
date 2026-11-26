@@ -4,7 +4,7 @@ import { useSearchParams } from "next/navigation";
 import { ChevronRight } from "lucide-react";
 import { useStore, useUser } from "@/lib/store";
 import { available, coverDays, fmt, monthsLeft } from "@/lib/calc";
-import { Modal, Thumb, toast } from "@/components/ui";
+import { Chips, Modal, Thumb, ViewSwitch, toast, useViewMode } from "@/components/ui";
 import type { Product } from "@/lib/types";
 
 function Stock() {
@@ -17,12 +17,19 @@ function Stock() {
   const canCount = role === "warehouse";
   const showCost = role === "admin" || role === "purchasing";
   const [q, setQ] = useState(params.get("q") ?? "");
+  const [view, setView] = useViewMode("stock", "table");
+  const [cat, setCat] = useState("all");
+  const [flt, setFlt] = useState<"all" | "low" | "expiry" | "damaged">("all");
   const [open, setOpen] = useState<string | null>(null);
   const [cnt, setCnt] = useState<Product | null>(null);
   const [ctn, setCtn] = useState(0);
   const [loose, setLoose] = useState(0);
   const [reason, setReason] = useState("Routine cycle count");
-  const rows = products.filter((p) => (p.name + p.code + p.brand + p.bin).toLowerCase().includes(q.toLowerCase()));
+  const categories = Array.from(new Set(products.map((p) => p.category))).sort();
+  const rows = products
+    .filter((p) => (p.name + p.code + p.brand + p.bin).toLowerCase().includes(q.toLowerCase()))
+    .filter((p) => cat === "all" || p.category === cat)
+    .filter((p) => flt === "all" || (flt === "low" ? available(p) < p.reorder : flt === "damaged" ? p.damaged > 0 : p.batches.some((b) => monthsLeft(b.expiry) <= 2)));
   const low = products.filter((p) => available(p) < p.reorder).length;
   const near = products.reduce((s, p) => s + p.batches.filter((b) => monthsLeft(b.expiry) <= 2).length, 0);
   const pend = adjustments.filter((a) => a.status === "pending").length;
@@ -35,8 +42,37 @@ function Stock() {
         {near > 0 && <span className="chip chip-bad">{near} batches expire within 2 months</span>}
         {pend > 0 && <span className="chip chip-info">{pend} stock count waiting for owner</span>}
         <span className="ml-auto text-xs text-ink2">Cartons · click a row to see batches</span>
+        <ViewSwitch mode={view} onChange={setView} />
       </div>
-      <div className="panel min-h-0 flex-1 overflow-auto">
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+        <Chips value={cat} onChange={setCat} items={[{ k: "all", label: "All categories", count: products.length }, ...categories.map((c) => ({ k: c, label: c, count: products.filter((p) => p.category === c).length }))]} />
+        <Chips value={flt} onChange={setFlt} items={[{ k: "all", label: "Everything" }, { k: "low", label: "Running low" }, { k: "expiry", label: "Expiring soon" }, { k: "damaged", label: "Has damaged" }]} />
+      </div>
+      {view === "tiles" && (
+        <div className="grid min-h-0 flex-1 grid-cols-[repeat(auto-fill,minmax(215px,1fr))] content-start gap-3 overflow-auto">
+          {rows.map((p) => { const a = available(p); const m = [...p.batches].sort((x, y) => x.expiry.localeCompare(y.expiry))[0]; return (
+            <div key={p.id} className="panel flex flex-col gap-2 p-3.5">
+              <div className="flex items-start justify-between"><Thumb p={p} size={44} /><span className={`chip num ${a < p.reorder ? "chip-warn" : "chip-ok"}`}>{fmt(a / p.packSize)} ctn</span></div>
+              <div className="text-[13.5px] font-semibold leading-snug">{p.name}</div>
+              <div className="num text-[11px] text-ink3">{p.code} · rack {p.bin || "—"}</div>
+              <div className="flex flex-wrap gap-1"><span className="chip chip-mute">{p.category}</span>{p.damaged > 0 && <span className="chip chip-bad">{Math.round(p.damaged / p.packSize * 10) / 10} damaged</span>}{m && monthsLeft(m.expiry) <= 2 && <span className="chip chip-warn">exp {m.expiry}</span>}</div>
+              <div className="mt-auto flex items-center justify-between text-[11px] text-ink2"><span>On hand <b className="num">{fmt(p.stock / p.packSize)}</b></span><span>Cover <b className="num">{coverDays(p).toFixed(0)}d</b></span></div>
+              {canCount && <button className="btn h-7 justify-center" onClick={() => { setCnt(p); setCtn(0); setLoose(0); }}>Count</button>}
+            </div>); })}
+        </div>
+      )}
+      {view === "compact" && (
+        <div className="panel min-h-0 flex-1 overflow-auto">
+          {rows.map((p) => { const a = available(p); return (
+            <div key={p.id} className="row-hover flex items-center gap-3 border-b border-line px-3 py-1.5 text-[12.5px]">
+              <Thumb p={p} size={22} /><span className="num w-14 text-ink3">{p.bin}</span><span className="min-w-0 flex-1 truncate font-medium">{p.name}</span>
+              <span className="hidden w-44 truncate text-ink3 md:block">{p.category}</span><span className="num w-16 text-right">{fmt(p.stock / p.packSize)}</span>
+              <span className={`chip num w-16 justify-center ${a < p.reorder ? "chip-warn" : "chip-ok"}`}>{fmt(a / p.packSize)}</span>
+              {canCount && <button className="btn h-7" onClick={() => { setCnt(p); setCtn(0); setLoose(0); }}>Count</button>}
+            </div>); })}
+        </div>
+      )}
+      <div className={`panel min-h-0 flex-1 overflow-auto ${view === "table" ? "" : "hidden"}`}>
         <table className="w-full text-[12.5px]">
           <thead><tr className="th sticky top-0 z-10 bg-panel text-left"><th className="w-6" /><th className="py-2.5">Product</th><th>Rack</th><th className="text-right">On hand</th><th className="text-right">Reserved</th><th className="text-right">Available</th><th className="text-right">Damaged</th><th className="text-right">Cover</th>{showCost && <th className="text-right">Cost / ctn</th>}{showCost && <th className="text-right">Value</th>}{canCount && <th />}</tr></thead>
           <tbody>

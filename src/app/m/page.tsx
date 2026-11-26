@@ -3,9 +3,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Route as RouteIcon, ClipboardList, Boxes, Truck, Wallet, LogOut, Moon, Sun, ChevronLeft, Minus, Plus, MapPin } from "lucide-react";
 import { useStore, useUser } from "@/lib/store";
-import { available, creditUsedPct, fmt, lineNet, orderTotal, rateFor, totals, ago, withScheme } from "@/lib/calc";
+import { applySchemes, available, creditUsedPct, fmt, lineNet, orderTotal, totals, ago, unitRate } from "@/lib/calc";
 import type { Customer, Line, Product, ReturnReason, Unit } from "@/lib/types";
-import { Avatar, CreditMeter, Meter, StatusChip, Thumb, Toaster, toast, useHydrated } from "@/components/ui";
+import { Avatar, CreditMeter, Meter, StatusChip, Thumb, Toaster, ViewSwitch, toast, useHydrated, useViewMode } from "@/components/ui";
 import { useTheme } from "@/components/AppShell";
 
 type Tab = "route" | "orders" | "stock" | "trip" | "collect";
@@ -67,43 +67,97 @@ export default function Mobile() {
   );
 }
 
+const DAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][new Date().getDay()];
+
 function RouteView({ onStart }: { onStart: (c: string) => void }) {
   const user = useUser()!;
-  const customers = useStore((s) => s.customers).filter((c) => c.bookerId === user.id);
+  const routes = useStore((s) => s.routes).filter((r) => r.bookerId === user.id);
+  const allCustomers = useStore((s) => s.customers);
   const orders = useStore((s) => s.orders);
-  const route = customers[0]?.route ?? "";
+  const today = routes.filter((r) => r.days.includes(DAY));
+  const shown = today.length ? today : routes;
+  const customers = allCustomers.filter((c) => shown.some((r) => r.name === c.route));
   const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
   const done = (c: Customer) => orders.some((o) => o.customerId === c.id && o.bookerId === user.id && o.createdAt >= todayStart.getTime() && o.status !== "cancelled");
   const visited = customers.filter(done).length;
-  const next = customers.find((c) => !done(c));
+  const next = customers.find((c) => !done(c) && c.status === "active");
   return (
     <div className="p-4">
       <div className="mb-3">
-        <div className="th">Today&apos;s route</div>
+        <div className="th">{today.length ? "Today's route" : "No visit scheduled today"}</div>
         <div className="text-[20px] font-bold leading-tight">{new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short" })}</div>
-        <div className="mt-2 flex items-center justify-between text-xs text-ink2"><span><span className="num font-semibold text-ink">{visited}</span> of {customers.length} visits done</span><span className="num">{route}</span></div>
+        <div className="mt-2 flex items-center justify-between text-xs text-ink2"><span><span className="num font-semibold text-ink">{visited}</span> of {customers.length} visits done</span><span className="num">{shown.map((r) => r.name).join(" · ")}</span></div>
         <div className="mt-1.5"><Meter pct={customers.length ? (visited / customers.length) * 100 : 0} /></div>
+        {!today.length && routes.length > 0 && <div className="mt-2 text-[11.5px] text-ink3">Showing all your routes. {routes.map((r) => `${r.name}: ${r.days.join(", ")}`).join(" · ")}</div>}
       </div>
       <div className="space-y-2.5">
         {customers.map((c, i) => {
           const d = done(c);
+          const blocked = c.status === "blocked";
           const isNext = next?.id === c.id;
           return (
-            <div key={c.id} className={`panel p-3.5 ${isNext ? "border-accent" : ""}`} style={isNext ? { boxShadow: "inset 4px 0 0 var(--accent), var(--shadow)" } : undefined}>
+            <div key={c.id} className={`panel p-3.5 ${isNext ? "border-accent" : ""} ${blocked ? "opacity-70" : ""}`} style={isNext ? { boxShadow: "inset 4px 0 0 var(--accent), var(--shadow)" } : undefined}>
               <div className="flex items-start gap-3">
                 <div className="flex-1">
                   <div className="text-[14.5px] font-semibold">{c.name}</div>
                   <div className="mt-0.5 flex items-center gap-1.5 text-[11.5px] text-ink3"><MapPin size={12} /> {c.area} · {(0.4 + i * 0.7).toFixed(1)} km</div>
                   <div className="num mt-1 text-xs text-ink2">Bal Rs. {fmt(c.balance)}</div>
                 </div>
-                <span className={`chip ${d ? "chip-ok" : "chip-mute"}`}>{d ? "Ordered" : "Pending"}</span>
+                {blocked ? <span className="chip chip-bad">Blocked</span> : <span className={`chip ${d ? "chip-ok" : "chip-mute"}`}>{d ? "Ordered" : "Pending"}</span>}
               </div>
-              {(isNext || !d) && <button className={`btn mt-3 h-11 w-full justify-center text-[14px] ${isNext ? "btn-primary" : ""}`} onClick={() => onStart(c.id)}>{d ? "Add another order" : "Start order →"}</button>}
+              {blocked && <div className="mt-2 text-[11.5px] font-semibold text-[var(--bad-fg)]">{c.blockedReason}. Collect payment, then ask the office to unblock.</div>}
+              {!blocked && (isNext || !d) && <button className={`btn mt-3 h-11 w-full justify-center text-[14px] ${isNext ? "btn-primary" : ""}`} onClick={() => onStart(c.id)}>{d ? "Add another order" : "Start order →"}</button>}
             </div>
           );
         })}
         {customers.length === 0 && <div className="p-8 text-center text-ink3">No customers assigned</div>}
       </div>
+    </div>
+  );
+}
+
+function CatalogGrid({ products, onPick, mode, cat }: { products: Product[]; onPick?: (p: Product) => void; mode: "tiles" | "table" | "compact"; cat: string }) {
+  const list = products.filter((p) => cat === "all" || p.category === cat);
+  if (mode === "tiles")
+    return (
+      <div className="grid grid-cols-2 gap-2.5">
+        {list.map((p) => {
+          const a = Math.floor(available(p) / p.packSize);
+          return (
+            <button key={p.id} disabled={!!onPick && a === 0} onClick={() => onPick?.(p)} className="panel flex flex-col gap-2 p-3 text-left active:scale-[0.98] disabled:opacity-60">
+              <div className="flex items-start justify-between"><Thumb p={p} size={44} /><span className={`chip num ${a === 0 ? "chip-bad" : a < p.reorder / p.packSize ? "chip-warn" : "chip-ok"}`}>{a === 0 ? "Out" : a}</span></div>
+              <div className="text-[13px] font-semibold leading-snug">{p.name}</div>
+              <div className="num mt-auto text-[15px] font-bold">{fmt(p.cartonPrice)}<span className="ml-1 text-[10px] font-medium text-ink3">/ctn</span></div>
+            </button>
+          );
+        })}
+      </div>
+    );
+  return (
+    <div className="space-y-1.5">
+      {list.map((p) => {
+        const a = Math.floor(available(p) / p.packSize);
+        return (
+          <button key={p.id} disabled={!!onPick && a === 0} onClick={() => onPick?.(p)} className={`panel flex w-full items-center gap-3 text-left active:bg-accentsoft disabled:opacity-60 ${mode === "compact" ? "px-3 py-2" : "p-3"}`}>
+            <Thumb p={p} size={mode === "compact" ? 26 : 38} />
+            <div className="min-w-0 flex-1"><div className="truncate text-[13.5px] font-semibold">{p.name}</div>{mode !== "compact" && <div className="num text-[11px] text-ink3">{p.category}</div>}</div>
+            <div className="num text-[13px] font-bold">{fmt(p.cartonPrice)}</div>
+            <span className={`chip num ${a === 0 ? "chip-bad" : "chip-ok"}`}>{a === 0 ? "Out" : a}</span>
+          </button>
+        );
+      })}
+      {list.length === 0 && <div className="py-8 text-center text-ink3">Nothing here</div>}
+    </div>
+  );
+}
+
+function CatFilter({ products, cat, setCat }: { products: Product[]; cat: string; setCat: (c: string) => void }) {
+  const cats = Array.from(new Set(products.map((p) => p.category))).sort();
+  return (
+    <div className="-mx-4 flex gap-1.5 overflow-x-auto px-4 pb-1">
+      {["all", ...cats].map((c) => (
+        <button key={c} onClick={() => setCat(c)} className={`h-8 shrink-0 rounded-full border px-3.5 text-[12.5px] font-semibold ${cat === c ? "border-accent bg-accentsoft text-accent" : "border-line bg-panel text-ink2"}`}>{c === "all" ? "All" : c}</button>
+      ))}
     </div>
   );
 }
@@ -116,38 +170,47 @@ function NewOrderM({ customerId, onBack, onDone }: { customerId: string; onBack:
   const orders = useStore((s) => s.orders);
   const create = useStore((s) => s.createOrder);
   const schemes = useStore((s) => s.schemes);
+  const lists = useStore((s) => s.priceLists);
   const [lines, setLines] = useState<Line[]>([]);
   const [q, setQ] = useState("");
+  const [browse, setBrowse] = useState(false);
+  const [cat, setCat] = useState("all");
+  const [bview, setBview] = useViewMode("m-browse", "tiles");
   const last = orders.find((o) => o.customerId === c.id && o.status !== "cancelled");
-  const priced = lines.map((l) => withScheme(schemes, l));
+  const priced = applySchemes(schemes, lines, c.route);
   const t = totals(priced);
-  const hits = q ? products.filter((p) => (p.name + p.code).toLowerCase().includes(q.toLowerCase())).slice(0, 5) : [];
+  const blocked = c.status === "blocked";
+  const hits = q ? products.filter((p) => (p.name + p.code + p.barcode).toLowerCase().includes(q.toLowerCase())).slice(0, 5) : [];
   const set = (i: number, patch: Partial<Line>) => setLines(lines.map((l, k) => (k === i ? { ...l, ...patch } : l)));
-  const add = (p: Product) => { setLines((ls) => ls.some((l) => l.productId === p.id) ? ls.map((l) => l.productId === p.id ? { ...l, qty: l.qty + 1 } : l) : [...ls, { productId: p.id, unit: "ctn", qty: 1, rate: rateFor(p, "ctn"), discPct: 0 }]); setQ(""); };
+  const add = (p: Product) => { setLines((ls) => ls.some((l) => l.productId === p.id) ? ls.map((l) => l.productId === p.id ? { ...l, qty: l.qty + 1 } : l) : [...ls, { productId: p.id, unit: "ctn", qty: 1, rate: unitRate(p, "ctn", c, lists), discPct: 0 }]); setQ(""); };
   const projected = c.balance + t.total;
   return (
     <>
       <header className="shrink-0 border-b border-line bg-panel px-3 py-3">
         <div className="flex items-center gap-2"><button className="p-1.5" onClick={onBack}><ChevronLeft size={22} /></button>
-          <div className="flex-1"><div className="text-[11px] text-ink3">New order</div><div className="text-[16px] font-bold leading-tight">{c.name}</div></div></div>
+          <div className="flex-1"><div className="text-[11px] text-ink3">New order · {lists.find((l) => l.id === c.priceListId)?.name} prices</div><div className="text-[16px] font-bold leading-tight">{c.name}</div></div></div>
         <div className="mt-2 rounded-xl border border-line bg-panel2 p-2.5">
           <div className="flex justify-between text-xs"><span className="num">Bal Rs. {fmt(c.balance)}</span><span className={`font-semibold ${creditUsedPct(c) >= 70 ? "text-[var(--warn-fg)]" : "text-ink2"}`}>{c.type === "credit" ? `${creditUsedPct(c)}% used` : "Cash"}</span></div>
           {c.type === "credit" && <div className="mt-1.5"><Meter pct={creditUsedPct(c)} /></div>}
           {c.type === "credit" && projected > c.creditLimit && <div className="mt-1.5 text-[11.5px] font-semibold text-[var(--bad-fg)]">This order exceeds the credit limit. The desk will review it.</div>}
         </div>
+        {blocked && <div className="mt-2 rounded-xl bg-[var(--bad-bg)] px-3 py-2 text-[12px] font-semibold text-[var(--bad-fg)]">Blocked: {c.blockedReason}. You cannot book orders for this customer.</div>}
       </header>
       <main className="min-h-0 flex-1 space-y-3 overflow-auto p-3">
-        {last && <button className="btn h-11 w-full justify-center border-accent text-accent" onClick={() => setLines(last.lines.map((l) => ({ ...l, pickedQty: undefined })))}>Repeat last order</button>}
+        <div className="flex gap-2">
+          {last && <button className="btn h-11 flex-1 justify-center border-accent text-accent" onClick={() => setLines(last.lines.filter((l) => !l.isFree).map((l) => { const pr = allProducts.find((p) => p.id === l.productId); return { ...l, pickedQty: undefined, manualDisc: undefined, rate: pr ? unitRate(pr, l.unit, c, lists) : l.rate }; }))}>Repeat last order</button>}
+          <button className="btn h-11 flex-1 justify-center" onClick={() => setBrowse(true)}>Browse catalog</button>
+        </div>
         <div className="relative">
-          <input className="field h-11 text-[14px]" placeholder="Add product…" value={q} onChange={(e) => setQ(e.target.value)} />
+          <input className="field h-11 text-[14px]" placeholder="Search name, code or barcode…" value={q} onChange={(e) => setQ(e.target.value)} />
           {hits.length > 0 && <div className="panel absolute z-10 mt-1 w-full p-1">{hits.map((p) => (
             <button key={p.id} className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2.5 text-left active:bg-accentsoft" onClick={() => add(p)}>
               <Thumb p={p} size={30} /><span className="flex-1 font-medium">{p.name}</span><span className="chip chip-ok num">{Math.floor(available(p) / p.packSize)} ctn</span>
             </button>))}</div>}
         </div>
-        {lines.length === 0 && <div className="py-10 text-center text-ink3">Search a product or repeat the last order</div>}
+        {lines.length === 0 && <div className="py-10 text-center text-ink3">Search, browse the catalog, or repeat the last order</div>}
         {lines.map((l, i) => {
-          const p = products.find((x) => x.id === l.productId)!;
+          const p = allProducts.find((x) => x.id === l.productId)!;
           const avCtn = Math.floor(available(p) / (l.unit === "ctn" ? p.packSize : 1));
           const low = l.qty > avCtn;
           return (
@@ -159,7 +222,7 @@ function NewOrderM({ customerId, onBack, onDone }: { customerId: string; onBack:
               </div>
               <div className="mt-2.5 flex items-center gap-2">
                 <div className="flex rounded-lg border border-line2 p-0.5 text-xs font-semibold">
-                  {(["ctn", "pcs"] as Unit[]).map((u) => <button key={u} onClick={() => set(i, { unit: u, rate: rateFor(p, u) })} className={`rounded-md px-2.5 py-1 uppercase ${l.unit === u ? "bg-accent text-accentink" : "text-ink2"}`}>{u}</button>)}
+                  {(["ctn", "pcs"] as Unit[]).map((u) => <button key={u} onClick={() => set(i, { unit: u, rate: unitRate(p, u, c, lists) })} className={`rounded-md px-2.5 py-1 uppercase ${l.unit === u ? "bg-accent text-accentink" : "text-ink2"}`}>{u}</button>)}
                 </div>
                 <span className={`chip num ${low ? "chip-warn" : "chip-ok"}`}>{low ? `Short · ${avCtn}` : `In stock ${avCtn}`}</span>
                 <div className="ml-auto flex items-center gap-1">
@@ -171,12 +234,22 @@ function NewOrderM({ customerId, onBack, onDone }: { customerId: string; onBack:
             </div>
           );
         })}
+        {priced.filter((l) => l.isFree).map((l, i) => { const p = allProducts.find((x) => x.id === l.productId)!; return (
+          <div key={`f${i}`} className="flex items-center gap-3 rounded-2xl border border-accent bg-accentwash p-3"><Thumb p={p} size={34} /><div className="flex-1"><div className="text-[13.5px] font-semibold">{p.name}</div><div className="text-[11px] font-semibold text-accent">{l.scheme}</div></div><span className="chip chip-info num">{l.qty} ctn FREE</span></div>); })}
       </main>
       <footer className="shrink-0 border-t border-line bg-panel p-3 pb-[max(12px,env(safe-area-inset-bottom))]">
         <div className="mb-2 flex items-end justify-between"><span className="text-xs text-ink2"><span className="num font-semibold text-ink">{lines.length}</span> items · incl. 18% tax</span><span className="num text-[22px] font-bold text-accent">Rs. {fmt(t.total)}</span></div>
-        <button className="btn btn-primary h-12 w-full justify-center text-[15px]" disabled={!lines.length}
-          onClick={() => { create(c.id, lines.filter((l) => l.qty > 0), user.id); toast("Order submitted to Sales Desk"); onDone(); }}>Submit order →</button>
+        <button className="btn btn-primary h-12 w-full justify-center text-[15px]" disabled={!lines.length || blocked}
+          onClick={() => { create(c.id, lines.filter((l) => l.qty > 0), user.id); toast("Order submitted to Back Office"); onDone(); }}>Submit order →</button>
       </footer>
+      {browse && (
+        <div className="fixed inset-0 z-50 flex items-end bg-black/40" onClick={() => setBrowse(false)}>
+          <div className="mx-auto flex h-[82dvh] w-full max-w-[430px] flex-col rounded-t-2xl bg-bg" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 border-b border-line bg-panel px-4 py-3 rounded-t-2xl"><div className="flex-1 text-[16px] font-bold">Catalog</div><ViewSwitch mode={bview} onChange={setBview} /><button className="btn h-8" onClick={() => setBrowse(false)}>Done</button></div>
+            <div className="space-y-3 overflow-auto p-4"><CatFilter products={products} cat={cat} setCat={setCat} /><CatalogGrid products={products} cat={cat} mode={bview} onPick={(p) => { add(p); toast(`${p.name} added`); }} /></div>
+          </div>
+        </div>
+      )}
       <Toaster />
     </>
   );
@@ -204,16 +277,15 @@ function OrdersView() {
 function StockView() {
   const products = useStore((s) => s.products).filter((p) => p.status === "active");
   const [q, setQ] = useState("");
+  const [cat, setCat] = useState("all");
+  const [mode, setMode] = useViewMode("m-stock", "tiles");
+  const list = products.filter((p) => (p.name + p.code + p.barcode).toLowerCase().includes(q.toLowerCase()));
   return (
-    <div className="p-4">
-      <div className="mb-2 text-[18px] font-bold">Live stock</div>
-      <input className="field mb-3 h-11 text-[14px]" placeholder="Search product…" value={q} onChange={(e) => setQ(e.target.value)} />
-      <div className="space-y-2">
-        {products.filter((p) => (p.name + p.code).toLowerCase().includes(q.toLowerCase())).map((p) => {
-          const a = Math.floor(available(p) / p.packSize);
-          return <div key={p.id} className="panel flex items-center gap-3 p-3"><Thumb p={p} size={34} /><div className="flex-1"><div className="font-semibold">{p.name}</div><div className="num text-[11px] text-ink3">Rs. {fmt(p.cartonPrice)} / ctn</div></div><span className={`chip num ${a < p.reorder / p.packSize ? "chip-warn" : "chip-ok"}`}>{a} ctn</span></div>;
-        })}
-      </div>
+    <div className="space-y-3 p-4">
+      <div className="flex items-center justify-between"><div className="text-[18px] font-bold">Catalog & stock</div><ViewSwitch mode={mode} onChange={setMode} /></div>
+      <input className="field h-11 text-[14px]" placeholder="Search name, code or barcode…" value={q} onChange={(e) => setQ(e.target.value)} />
+      <CatFilter products={list} cat={cat} setCat={setCat} />
+      <CatalogGrid products={list} cat={cat} mode={mode} />
     </div>
   );
 }
