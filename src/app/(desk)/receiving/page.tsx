@@ -194,6 +194,17 @@ function GrnView({ g, isWh, isPur, by, onDoc, onLabels }: { g: Grn; isWh: boolea
   const sum = (f: (l: GrnLine) => number) => g.lines.reduce((s, l) => s + f(l), 0);
   const shortAll = g.lines.reduce((s, l) => s + Math.max(0, remaining(po, grns.filter((x) => x.id !== g.id), l.productId, true) - accepted(l)), 0);
 
+  const [guide, setGuide] = useState(true);
+  const fillSample = () => {
+    const d = new Date();
+    const yy = String(d.getFullYear()).slice(2), mm = String(d.getMonth() + 1).padStart(2, "0");
+    const exp = `${d.getFullYear() + 1}-${mm}`;
+    g.lines.forEach((l, i) => {
+      const p = products.find((x) => x.id === l.productId)!;
+      update(g.id, i, { batch: l.batch || `${p.code.replace(/[^A-Z]/g, "")}${yy}${mm}`, expiry: l.expiry || exp, arrived: l.arrived || 0 });
+    });
+    toast("Sample batch numbers and expiry dates filled in");
+  };
   const doScan = () => {
     if (!code.trim()) return;
     const r = scan(g.id, code);
@@ -224,14 +235,26 @@ function GrnView({ g, isWh, isPur, by, onDoc, onLabels }: { g: Grn; isWh: boolea
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <div className="relative"><ScanLine size={14} className="absolute left-2.5 top-2.5 text-ink3" /><input className="field w-[280px]" style={{ paddingLeft: 32 }} placeholder="Scan or type a product code, Enter = +1 carton" value={code} onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => e.key === "Enter" && doScan()} autoFocus /></div>
             <button className="btn" onClick={() => { fill(g.id); toast("Filled with the expected quantities. Check them against the truck"); }}>Fill expected</button>
-            <span className="text-[11px] text-ink3">Try codes like SE-01, VM-02, LP-05</span>
+            <button className="btn" onClick={fillSample}>Fill sample batch and expiry</button>
+          </div>
+        )}
+        {editing && guide && (
+          <div className="mt-3 rounded-xl border border-accent bg-accentwash p-3 text-[12.5px]">
+            <div className="mb-1.5 flex items-center justify-between"><b>How to count this truck</b><button className="text-xs text-ink3 hover:text-ink" onClick={() => setGuide(false)}>Hide</button></div>
+            <ol className="list-decimal space-y-0.5 pl-5 text-ink2">
+              <li><b>Arrived:</b> type how many cartons are really on the truck for each product. Press <b>Fill expected</b> if everything is there.</li>
+              <li><b>Rejected, Damaged, Held:</b> only if some cartons are refused, broken, or need a quality check. Then choose a reason.</li>
+              <li><b>Batch and Expiry:</b> copy them from the carton print (example: batch <span className="num">NM2701</span>, expiry <span className="num">2027-03</span>). In the demo, press <b>Fill sample batch and expiry</b>.</li>
+              <li>When the red messages are gone, press <b>Submit count</b>. Purchasing approves it and the good cartons become stock.</li>
+            </ol>
+            <div className="mt-1.5 text-[11px] text-ink3">Barcode scanner users: type a product code like SE-01 in the box and press Enter to add one carton.</div>
           </div>
         )}
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto px-5 py-3">
         <table className="w-full text-[12.5px]">
-          <thead><tr className="th text-left"><th className="py-2">Product</th><th className="text-right">Expected</th><th className="text-right">Arrived</th><th className="text-right">Rejected</th><th className="text-right">Damaged</th><th className="text-right">Held</th><th className="pl-6 text-right">Good</th><th className="pl-5">Batch</th><th className="pl-3">Expiry</th></tr></thead>
+          <thead><tr className="th text-left"><th className="py-2">Product</th><th className="text-right">Expected</th><th className="text-right">Arrived</th><th className="text-right">Rejected</th><th className="text-right">Damaged</th><th className="text-right">Held</th><th className="pl-6 text-right">Good</th><th className="pl-5" title="Printed on the carton">Batch</th><th className="pl-3" title="Printed on the carton, as year-month">Expiry</th></tr></thead>
           <tbody>
             {g.lines.map((l, i) => {
               const p = products.find((x) => x.id === l.productId)!;
