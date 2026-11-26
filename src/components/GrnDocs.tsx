@@ -53,8 +53,8 @@ export function LabelSheet({ g, onClose }: { g: Grn; onClose: () => void }) {
             <div className="truncate text-[11px] font-bold">{p.name}</div>
             <div className="mt-0.5 flex justify-between text-[10px]"><span className="num">Batch <b>{l.batch}</b></span><span className="num">Exp <b>{l.expiry}</b></span></div>
             <div className="mt-0.5 flex justify-between text-[10px]"><span className="num">Rack <b>{p.bin || "—"}</b></span><span className="num">{p.packSize} pcs</span></div>
-            <div className="mt-1 flex justify-center overflow-hidden"><Barcode value={p.code} height={28} unit={1.1} /></div>
-            <div className="num mt-0.5 text-center text-[9px]">{p.code}</div>
+            <div className="mt-1 flex justify-center overflow-hidden"><Barcode value={`${p.code}-${l.batch}`} height={28} unit={0.9} /></div>
+            <div className="num mt-0.5 text-center text-[9px]">{p.code}-{l.batch}</div>
           </div>
         ))}
         {labels.length === 0 && <div className="col-span-3 p-6 text-center text-ink3">Nothing to label yet.</div>}

@@ -39,7 +39,7 @@ function Orders() {
   const counts = {
     over: enriched.filter((e) => e.o.status === "booked" && e.chk.over).length,
     short: enriched.filter((e) => e.o.status === "booked" && e.chk.short.length).length,
-    ready: enriched.filter((e) => e.o.status === "picked").length,
+    ready: enriched.filter((e) => e.o.status === "picked" && e.o.packed).length,
   };
 
   const list = useMemo(() => {
@@ -47,7 +47,7 @@ function Orders() {
     return enriched.filter(({ o, c, chk }) => {
       if (tab === "approval" && !(o.status === "booked" || (o.status === "hold" && !o.needsOwner))) return false;
       if (tab === "owner" && !(o.status === "hold" && o.needsOwner)) return false;
-      if (tab === "invoice" && o.status !== "picked") return false;
+      if (tab === "invoice" && !(o.status === "picked" && o.packed)) return false;
       if (tab === "delivery" && o.status !== "invoiced") return false;
       if (tab === "overdue" && !(c.type === "credit" && c.oldestDue > c.creditDays)) return false;
       if (ql && !(o.folio + c.name + (o.invoiceNo ?? "")).toLowerCase().includes(ql)) return false;
@@ -72,7 +72,7 @@ function Orders() {
         const r = approve(o.id, by);
         toast(r.ok ? `${o.folio} approved. Stock reserved, sent to warehouse` : `Needs owner approval: ${r.reasons?.[0]}`);
       } };
-    if (o.status === "picked")
+    if (o.status === "picked" && o.packed)
       return { label: "Create invoice", run: () => { invoice(o.id, by); toast(`Invoice issued for ${o.folio}`); } };
     return undefined;
   })();
@@ -150,7 +150,7 @@ function Orders() {
                   <Spark seed={parseInt(c.id.slice(1), 10)} />
                   <div className="flex flex-col items-end gap-1">
                     <span className="num text-[13px] font-semibold">{fmt(orderTotal(o))}</span>
-                    <StatusChip status={o.status} />
+                    <StatusChip status={o.status} packed={o.packed} held={!!o.pickHold} />
                   </div>
                 </button>
               );

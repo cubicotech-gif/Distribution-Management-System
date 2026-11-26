@@ -95,7 +95,9 @@ const STATUS: Record<OrderStatus, [string, string]> = {
   cancelled: ["Cancelled", "chip-mute"],
 };
 export const statusLabel = (s: OrderStatus) => STATUS[s][0];
-export function StatusChip({ status }: { status: OrderStatus }) {
+export function StatusChip({ status, packed, held }: { status: OrderStatus; packed?: boolean; held?: boolean }) {
+  if (status === "picked" && packed === false) return <span className="chip chip-info">Being packed</span>;
+  if (status === "approved" && held) return <span className="chip chip-bad">Pick on hold</span>;
   return <span className={`chip ${STATUS[status][1]}`}>{STATUS[status][0]}</span>;
 }
 

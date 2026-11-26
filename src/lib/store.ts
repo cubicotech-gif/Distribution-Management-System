@@ -4,7 +4,7 @@ import { persist } from "zustand/middleware";
 import { BINS, CUSTOMERS, GRNS, LEDGER, ORDERS, PAYMENTS, PRICE_LISTS, PRODUCTS, PURCHASES, RETURNS, ROUTES, SCHEMES, SUPPLIERS, TRIPS, USERS } from "./seed";
 import { accepted, good, receivedSoFar } from "./grn";
 import { DOCK, HOLD, binUsed } from "./locations";
-import { applySchemes, isExpired, orderDue, orderTotal, pcsOf, totals, unpaidOrders } from "./calc";
+import { applySchemes, isExpired, orderDue, sellable, orderTotal, pcsOf, totals, unpaidOrders } from "./calc";
 import type {
   Activity, Allocation, Approval, Customer, Line, Order, OrderStatus, Payment, Product, PurchaseOrder,
   Bin, ChangeEntry, EntryKind, Grn, GrnLine, PriceChange, PriceList, ProductStatus, ReturnNote, ReturnReason, Role, Route, Scheme, StockAdj, StockEntry, StockMove, Supplier, SupplierReturn, Trip, User,
@@ -114,6 +114,10 @@ interface State {
   restoreOrder: (id: string, status: OrderStatus, by: string) => void;
   cancelOrder: (id: string, by: string) => void;
   pickOrder: (id: string, picked: Record<number, number>, reasons: Record<number, string>, by: string) => void;
+  packOrder: (id: string, cartons: number, note: string, by: string) => void;
+  holdPick: (id: string, reason: string, by: string) => void;
+  releasePick: (id: string, by: string) => void;
+  pickWave: (orderIds: string[], by: string) => { done: number; short: number };
   invoiceOrder: (id: string, by: string) => void;
   invoiceAll: (by: string) => number;
 
@@ -315,15 +319,59 @@ export const useStore = create<State>()(
         set({
           products,
           ledger: led(s, by, picks.map((e) => ({ ...e, ref: challanNo, note: custName }))),
-          orders: s.orders.map((x) => (x.id === id ? { ...x, lines, allocation, challanNo, status: "picked", trail: stamp(x, "picked", by) } : x)),
+          orders: s.orders.map((x) => (x.id === id ? { ...x, lines, allocation, challanNo, pickedBy: by, status: "picked", trail: stamp(x, "picked", by) } : x)),
           activity: log(s, `${challanNo} created for ${o.folio}. Batches allocated by expiry`),
         });
       },
 
-      invoiceOrder: (id, by) => {
+      packOrder: (id, cartons, note, by) => {
         const s = get();
         const o = s.orders.find((x) => x.id === id);
         if (!o || o.status !== "picked") return;
+        set({
+          orders: s.orders.map((x) => (x.id === id ? { ...x, packed: true, cartons, packNote: note || undefined, packedBy: by, packedAt: Date.now() } : x)),
+          activity: log(s, `${o.folio} packed and checked by ${by} (${cartons} carton${cartons === 1 ? "" : "s"}). Back office can invoice it`),
+        });
+      },
+      holdPick: (id, reason, by) => {
+        const s = get();
+        const o = s.orders.find((x) => x.id === id);
+        if (!o || o.status !== "approved") return;
+        set({ orders: s.orders.map((x) => (x.id === id ? { ...x, pickHold: reason } : x)), activity: log(s, `${by} put the pick for ${o.folio} on hold: ${reason}`) });
+      },
+      releasePick: (id, by) => {
+        const s = get();
+        const o = s.orders.find((x) => x.id === id);
+        if (!o) return;
+        set({ orders: s.orders.map((x) => (x.id === id ? { ...x, pickHold: undefined } : x)), activity: log(s, `${by} released the pick for ${o.folio}`) });
+      },
+      pickWave: (orderIds, by) => {
+        const s = get();
+        const wave = `W-${100 + s.orders.filter((o) => o.wave).length + 1}`;
+        let done = 0, shortLines = 0;
+        const list = s.orders.filter((o) => orderIds.includes(o.id) && o.status === "approved" && !o.pickHold).sort((a, b) => a.createdAt - b.createdAt);
+        for (const o of list) {
+          const cur = get().products;
+          const picked: Record<number, number> = {};
+          const reasons: Record<number, string> = {};
+          o.lines.forEach((l, i) => {
+            const p = cur.find((x) => x.id === l.productId)!;
+            const per = l.unit === "ctn" ? p.packSize : 1;
+            const can = Math.floor(Math.min(pcsOf(l, p), sellable(p)) / per);
+            picked[i] = can;
+            if (can < l.qty) { reasons[i] = "Not enough on shelf"; shortLines++; }
+          });
+          get().pickOrder(o.id, picked, reasons, by);
+          set((st) => ({ orders: st.orders.map((x) => (x.id === o.id ? { ...x, wave } : x)) }));
+          done++;
+        }
+        set((st) => ({ activity: log(st, `${by} picked ${done} orders together as ${wave}. Sort the cartons by customer at packing`) }));
+        return { done, short: shortLines };
+      },
+      invoiceOrder: (id, by) => {
+        const s = get();
+        const o = s.orders.find((x) => x.id === id);
+        if (!o || o.status !== "picked" || !o.packed) return;
         const invoiceNo = `INV-${3000 + Number(o.folio.slice(3)) - 1000}`;
         const total = totals(o.lines).total;
         set({
@@ -334,7 +382,7 @@ export const useStore = create<State>()(
       },
 
       invoiceAll: (by) => {
-        const ids = get().orders.filter((o) => o.status === "picked").map((o) => o.id);
+        const ids = get().orders.filter((o) => o.status === "picked" && o.packed).map((o) => o.id);
         ids.forEach((id) => get().invoiceOrder(id, by));
         return ids.length;
       },
@@ -351,7 +399,7 @@ export const useStore = create<State>()(
       },
       dispatchTrip: (id, by) =>
         set((s) => ({
-          trips: s.trips.map((t) => (t.id === id ? { ...t, status: "out", dispatchedAt: Date.now() } : t)),
+          trips: s.trips.map((t) => (t.id === id ? { ...t, status: "out", dispatchedAt: Date.now(), seal: `SL-${10000 + Math.floor(Math.random() * 89999)}`, gatePass: `GP-${200 + s.trips.filter((x) => x.gatePass).length + 1}` } : t)),
           activity: log(s, `${s.trips.find((t) => t.id === id)?.folio} left the depot (${by})`),
         })),
       settleTrip: (id, counted, by) => {
@@ -862,8 +910,8 @@ export const useStore = create<State>()(
       setBookerTarget: (id, target) => set((s) => ({ users: s.users.map((u) => (u.id === id ? { ...u, target } : u)) })),
     }),
     {
-      name: "zarie-dms-v8",
-      version: 8,
+      name: "zarie-dms-v9",
+      version: 9,
       // The signed-in user belongs to this tab only; the business data is shared by every tab.
       partialize: (s) => Object.fromEntries(Object.entries(s).filter(([k]) => k !== "userId")) as unknown as State,
     }
@@ -904,6 +952,6 @@ export type { Role };
 // Keep open tabs in step: when another tab changes the data, pick it up straight away.
 if (typeof window !== "undefined") {
   window.addEventListener("storage", (e) => {
-    if (e.key === "zarie-dms-v8") useStore.persist.rehydrate();
+    if (e.key === "zarie-dms-v9") useStore.persist.rehydrate();
   });
 }

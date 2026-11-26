@@ -17,12 +17,14 @@ export default function Invoices() {
   const [busy, run] = useBusy();
   const [f, setF] = useState<"draft" | "open" | "all">("draft");
   const base = orders.filter((o) => ["picked", "invoiced", "delivered", "paid"].includes(o.status));
-  const rows = base.filter((o) => (f === "all" ? true : f === "draft" ? o.status === "picked" : o.status !== "picked" && orderDue(o) > 1));
-  const drafts = base.filter((o) => o.status === "picked").length;
+  const rows = base.filter((o) => (f === "all" ? true : f === "draft" ? o.status === "picked" && !!o.packed : o.status !== "picked" && orderDue(o) > 1));
+  const drafts = base.filter((o) => o.status === "picked" && o.packed).length;
+  const packing = base.filter((o) => o.status === "picked" && !o.packed).length;
   return (
     <div className="flex h-full flex-col gap-3">
       <div className="flex items-center gap-2">
         <button className={`btn ${f === "draft" ? "btn-primary" : ""}`} onClick={() => setF("draft")}>Ready to invoice <span className="num">{drafts}</span></button>
+        {packing > 0 && <span className="chip chip-info">{packing} still at the packing table</span>}
         <button className={`btn ${f === "open" ? "btn-primary" : ""}`} onClick={() => setF("open")}>Unpaid</button>
         <button className={`btn ${f === "all" ? "btn-primary" : ""}`} onClick={() => setF("all")}>All</button>
         <button className="btn btn-primary ml-auto" disabled={!drafts || busy} onClick={() => run(() => { toast(`${invoiceAll(by)} invoices issued`); })}>{busy ? <Spinner /> : null}Invoice all ready ({drafts})</button>
@@ -43,11 +45,11 @@ export default function Invoices() {
                     <td className="num text-right font-semibold">{fmt(orderTotal(o))}</td>
                     <td className="num text-right text-ink2">{fmt(o.paid)}</td>
                     <td className="num text-right">{o.status === "picked" ? "—" : fmt(orderDue(o))}</td>
-                    <td><StatusChip status={o.status} /></td>
+                    <td><StatusChip status={o.status} packed={o.packed} /></td>
                     <td className="text-ink3">{ago(o.createdAt)}</td>
                     <td className="space-x-1.5 pr-4 text-right">
                       <button className="btn h-7" onClick={() => setView(o)}>View</button>
-                      {o.status === "picked" && <button className="btn btn-primary h-7" onClick={() => { invoice(o.id, by); toast(`Invoice issued for ${o.folio}`); }}>Create invoice</button>}
+                      {o.status === "picked" && o.packed && <button className="btn btn-primary h-7" onClick={() => { invoice(o.id, by); toast(`Invoice issued for ${o.folio}`); }}>Create invoice</button>}
                     </td>
                   </tr>
                 );

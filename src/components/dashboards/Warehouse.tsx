@@ -25,6 +25,8 @@ export default function Warehouse() {
   const full = bins.filter((b) => !b.blocked && binUsed(products, b.code) > b.capacity + 0.001).length;
   const repl = replenishments(products, bins).length;
   const held = products.reduce((s, p) => s + p.quarantine.reduce((a, q) => a + q.qty / p.packSize, 0), 0);
+  const toPack = orders.filter((o) => o.status === "picked" && !o.packed);
+  const heldPicks = orders.filter((o) => o.status === "approved" && o.pickHold);
   const dispatch = orders.filter((o) => o.status === "invoiced" && !o.tripId);
   const loading = trips.filter((t) => t.status === "loading");
   const rets = returns.filter((r) => r.status === "pending");
@@ -35,10 +37,11 @@ export default function Warehouse() {
   return (
     <div className="mx-auto flex max-w-[1100px] flex-col gap-4">
       <div><h1 className="text-[22px] font-bold">Warehouse floor</h1><p className="text-ink2">Today&apos;s physical work: receive, pick, load, inspect returns.</p></div>
-      <div className="grid grid-cols-6 gap-3">
+      <div className="grid grid-cols-4 gap-3">
         <Tile label="Trucks due" value={inbound.length} sub={late.length ? `${late.length} late. ${counting.length} being counted` : `${counting.length} being counted`} href="/receiving" tone={late.length ? "warn" : undefined} />
         <Tile label="To put away" value={dock.length} sub={full || repl ? `${full ? full + " bins over capacity. " : ""}${repl ? repl + " pick faces to refill" : ""}` : "Batches at the dock"} href="/putaway" tone={dock.length ? "warn" : undefined} />
-        <Tile label="Orders to pick" value={toPick.length} sub={`${Math.round(cartons)} cartons`} href="/pick" tone={toPick.length ? "ok" : undefined} />
+        <Tile label="Orders to pick" value={toPick.length} sub={heldPicks.length ? `${heldPicks.length} on hold` : `${Math.round(cartons)} cartons`} href="/pick" tone={toPick.length ? "ok" : undefined} />
+        <Tile label="To pack and check" value={toPack.length} sub={toPack.length ? "Picked, waiting for the packing check" : "Packing table is clear"} href="/pack" tone={toPack.length ? "warn" : undefined} />
         <Tile label="Invoices to load" value={dispatch.length} sub={`${loading.length} load sheets open`} href="/dispatch" />
         <Tile label="Returns to inspect" value={rets.length} sub="Decide good or damaged" href="/returns" tone={rets.length ? "warn" : undefined} />
         <Tile label="Damaged / on hold" value={`${Math.round(damaged.reduce((s, p) => s + p.damaged / p.packSize, 0) * 10) / 10} / ${Math.round(held * 10) / 10}`} sub="Cartons: damaged · quality hold" href="/receiving" />

@@ -5,6 +5,7 @@ import { useStore, useUser } from "@/lib/store";
 import { ago, available, clock, fmt, lineNet, money, orderTotal, pcsOf, STEPS, STEP_LABEL, totals } from "@/lib/calc";
 import { checkOrder } from "@/lib/check";
 import type { Order, ReturnReason } from "@/lib/types";
+import MasterForm from "./MasterForm";
 import { AgingBar, Avatar, CreditMeter, Kbd, Modal, Spinner, StatusChip, Thumb, ask, toast, useBusy } from "./ui";
 
 export function Stepper({ o }: { o: Order }) {
@@ -145,6 +146,9 @@ export default function OrderDetail({ o, primary }: { o: Order; primary?: { labe
   const [busy, run] = useBusy();
   const [inv, setInv] = useState(false);
   const [ret, setRet] = useState(false);
+  const [holdOpen, setHoldOpen] = useState(false);
+  const holdPick = useStore((s) => s.holdPick);
+  const releasePick = useStore((s) => s.releasePick);
   const c = customers.find((x) => x.id === o.customerId)!;
   const booker = useStore((s) => s.users.find((u) => u.id === o.bookerId));
   const chk = checkOrder(o, c, products);
@@ -189,6 +193,7 @@ export default function OrderDetail({ o, primary }: { o: Order; primary?: { labe
             <div className="num text-[13px] font-semibold text-ink">{fmt(c.balance)} <span className="text-ink3">/ {c.creditLimit ? fmt(c.creditLimit) : "—"}</span></div>
           </div>
         </div>
+        {o.pickHold && o.status === "approved" && <div className="mt-3 rounded-xl border border-[var(--bad-fg)] bg-[var(--bad-bg)] px-3 py-2 text-[12px] text-[var(--bad-fg)]"><b>Pick on hold.</b> The warehouse cannot pick this order. {o.pickHold}</div>}
         {o.needsOwner && (
           <div className="mt-3 rounded-xl border border-[var(--warn-fg)] bg-[var(--warn-bg)] px-3 py-2 text-[12px] text-[var(--warn-fg)]">
             <span className="font-semibold">Waiting for owner.</span> {o.needsOwner.join(" · ")}
@@ -256,6 +261,7 @@ export default function OrderDetail({ o, primary }: { o: Order; primary?: { labe
             <button className="btn btn-primary h-9 px-4 text-[13px]" disabled={busy} onClick={() => run(primary.run)}>{busy ? <Spinner /> : null}{primary.label} <Kbd>↵</Kbd></button>
           )}
           {editable && o.status === "booked" && <button className="btn h-9" onClick={() => { hold(o.id, by); toast("Order put on hold", { undo: () => useStore.getState().restoreOrder(o.id, "booked", by) }); }}>Hold <Kbd>H</Kbd></button>}
+          {!readOnly && o.status === "approved" && (o.pickHold ? <button className="btn h-9" onClick={() => { releasePick(o.id, by); toast("Pick released. The warehouse can pick it now"); }}>Release pick</button> : <button className="btn h-9" onClick={() => setHoldOpen(true)}>Hold pick</button>)}
           {!readOnly && (o.status === "booked" || o.status === "hold" || o.status === "approved") && (
             <button className="btn btn-danger h-9" onClick={async () => { if (await ask({ title: `Cancel ${o.folio}?`, body: o.status === "approved" ? "The reserved stock is released and the warehouse is told to stop." : "The booker will see the order as cancelled.", confirm: "Cancel order", danger: true })) { cancel(o.id, by); toast("Order cancelled"); } }}>Cancel</button>
           )}
@@ -265,6 +271,7 @@ export default function OrderDetail({ o, primary }: { o: Order; primary?: { labe
           <div className="text-ink">Net total <span className="num ml-2 text-[20px] font-bold text-accent">{money(orderTotal(o))}</span></div>
         </div>
       </div>
+      {holdOpen && <MasterForm<{ reason: string }> title={`Hold the pick for ${o.folio}`} initial={{ reason: "" }} onClose={() => setHoldOpen(false)} fields={[{ key: "reason", label: "Why should the warehouse wait?", required: true, wide: true, hint: "For example: payment promised today, customer asked to delay" }]} footer={() => <div className="text-xs text-ink2">The order stays in the pick queue marked On hold. The warehouse cannot pick it until you release it.</div>} onSave={(v) => { holdPick(o.id, v.reason, by); setHoldOpen(false); toast("Pick put on hold"); }} />}
       {inv && <InvoiceDoc o={o} onClose={() => setInv(false)} />}
       {ret && <ReturnModal o={o} onClose={() => setRet(false)} />}
     </div>

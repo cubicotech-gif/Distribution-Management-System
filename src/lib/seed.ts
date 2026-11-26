@@ -278,3 +278,17 @@ export const LEDGER: StockEntry[] = (() => {
   });
   return out.sort((a, b) => b.at - a.at);
 })();
+
+export const VEHICLES = [
+  { no: "LEA-4821", label: "Hino truck", capacity: 120 },
+  { no: "LEB-3310", label: "Shehzore pickup", capacity: 80 },
+  { no: "LES-901", label: "Suzuki Bolan", capacity: 20 },
+];
+
+// Seed orders that are already past the picking stage were packed and checked.
+for (const o of ORDERS) {
+  if (["picked", "invoiced", "delivered", "paid"].includes(o.status)) {
+    o.packed = true; o.packedBy = "IA"; o.packedAt = o.createdAt + 2 * 3600_000;
+    o.cartons = Math.max(1, Math.round(o.lines.reduce((s, l) => { const p = PRODUCTS.find((x) => x.id === l.productId)!; return s + (l.unit === "ctn" ? l.qty : l.qty / p.packSize); }, 0)));
+  }
+}

@@ -19,7 +19,7 @@ export default function BackOffice() {
   const booked = orders.filter((o) => o.status === "booked" || (o.status === "hold" && !o.needsOwner));
   const exceptions = booked.filter((o) => { const c = checkOrder(o, customers.find((x) => x.id === o.customerId), products); return c.over || c.short.length; });
   const waitingOwner = orders.filter((o) => o.status === "hold" && o.needsOwner);
-  const ready = orders.filter((o) => o.status === "picked");
+  const ready = orders.filter((o) => o.status === "picked" && o.packed);
   const toSettle = trips.filter((t) => t.status === "out" && t.orderIds.every((id) => orders.find((o) => o.id === id)?.status !== "invoiced"));
   const mid = new Date(); mid.setHours(0, 0, 0, 0);
   const collected = payments.filter((p) => p.at >= mid.getTime()).reduce((s, p) => s + p.amount, 0);

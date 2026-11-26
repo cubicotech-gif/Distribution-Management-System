@@ -98,13 +98,14 @@ Built department by department. Nothing moves to the next department until the c
 - ⬜ Write-off approval by the owner above a value limit (write-offs currently need only a confirm)
 
 ### B5. Outbound
-- 🟡 Pick list sorted by rack with batch (FEFO), short-pick reason
-- ⬜ Batch / wave picking by route (one picker, several orders, sort at packing)
-- ⬜ Scan-to-confirm: scan bin and product; wrong batch or product is rejected
-- ⬜ Packing / checking step against the challan before dispatch (checker signs off)
-- ⬜ Carton count and labels per customer
-- 🟡 Load sheet and dispatch. ⬜ Gate pass, vehicle capacity check, load sequence reverse of drop sequence
-- ⬜ Hold and release a pick (customer on credit hold)
+- ✅ Pick list sorted by rack with bin and batch (FEFO, expired never picked), short-pick reason
+- ✅ Wave picking: tick orders or "Pick whole route", one consolidated pick list, each order still gets its own challan
+- ✅ Scan-to-confirm per stop: bin first, then carton label (product and batch); wrong bin, product or batch is rejected. "Confirm without scan" is recorded as manual. Typed entry only (no camera)
+- ✅ Packing check against the challan: count each line (scan adds one), sign-off, four-eyes warning when the picker also checks. Invoicing is blocked until packing is signed off
+- ✅ Carton / bag count per customer and customer carton labels (wave orders are tagged for sorting)
+- ✅ Load sheet in reverse drop order, drop-order editor with auto-sort, vehicle capacity check, gate pass with seal number
+- ✅ Hold and release a pick (back office), also automatic when the customer is blocked
+- ⬜ Substitute batch when the FEFO batch is damaged or missing (picker can only short-pick today)
 
 ### B6. Returns
 - 🟡 Inspect good / damaged

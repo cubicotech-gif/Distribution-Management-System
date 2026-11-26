@@ -123,6 +123,14 @@ export interface Order {
   note?: string;
   returned?: number;
   signature?: string;
+  wave?: string; // picked together with other orders, sort at packing
+  pickedBy?: string;
+  packed?: boolean; // packing check signed off
+  cartons?: number; // number of cartons / packages for this customer
+  packedBy?: string;
+  packedAt?: number;
+  packNote?: string;
+  pickHold?: string; // reason the warehouse must not pick this order yet
   filed?: boolean;
 }
 
@@ -139,6 +147,8 @@ export interface Trip {
   closedAt?: number;
   expectedCash?: number;
   countedCash?: number;
+  seal?: string;
+  gatePass?: string;
 }
 
 export interface PurchaseLine {
