@@ -6,7 +6,7 @@ import { Thumb } from "@/components/ui";
 import NewPO from "@/components/NewPO";
 
 export default function Planner() {
-  const products = useStore((s) => s.products);
+  const products = useStore((s) => s.products).filter((p) => p.status === "active");
   const purchases = useStore((s) => s.purchases);
   const [po, setPo] = useState<Record<string, number> | null>(null);
   const onOrder = (id: string) => purchases.filter((p) => p.status === "ordered").flatMap((p) => p.lines).filter((l) => l.productId === id).reduce((s, l) => s + l.ordered, 0);

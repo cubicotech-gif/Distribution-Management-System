@@ -26,11 +26,11 @@ export default function Approvals() {
           return (
             <div key={a.id} className="flex items-center gap-4 border-b border-line px-4 py-3.5 last:border-0">
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2"><span className="font-semibold">{a.text}</span><span className="chip chip-mute">{a.kind === "order" ? "Order" : "Stock count"}</span></div>
+                <div className="flex items-center gap-2"><span className="font-semibold">{a.text}</span><span className="chip chip-mute">{a.kind === "order" ? "Order" : a.kind === "price" ? "Price change" : "Stock count"}</span></div>
                 <div className="mt-0.5 text-xs text-[var(--warn-fg)]">{a.detail}</div>
                 <div className="mt-0.5 text-[11px] text-ink3">Requested by {a.by} · {ago(a.at)}{c && c.type === "credit" && <> · balance Rs. {fmt(c.balance)} of {fmt(c.creditLimit)}</>}</div>
               </div>
-              <div className="num text-[15px] font-bold">Rs. {fmt(a.amount)}</div>
+              {a.amount > 0 && <div className="num text-[15px] font-bold">Rs. {fmt(a.amount)}</div>}
               {o && <Link href={`/orders?id=${o.id}`} className="btn">View</Link>}
               <button className="btn btn-danger" onClick={() => { reject(a.id, by); toast("Rejected"); }}>Reject</button>
               <button className="btn btn-primary" onClick={() => { approve(a.id, by); toast("Approved"); }}>Approve</button>
@@ -41,7 +41,7 @@ export default function Approvals() {
       <div className="panel">
         <div className="th border-b border-line px-4 py-2.5">Decided</div>
         {done.length === 0 && <div className="p-4 text-ink3">None yet</div>}
-        {done.map((a) => <div key={a.id} className="flex items-center gap-3 border-b border-line px-4 py-2.5 last:border-0"><span className="flex-1">{a.text}</span><span className="num text-ink3">Rs. {fmt(a.amount)}</span><span className={`chip ${a.status === "approved" ? "chip-ok" : "chip-bad"}`}>{a.status}</span></div>)}
+        {done.map((a) => <div key={a.id} className="flex items-center gap-3 border-b border-line px-4 py-2.5 last:border-0"><span className="flex-1">{a.text}</span>{a.amount > 0 && <span className="num text-ink3">Rs. {fmt(a.amount)}</span>}<span className={`chip ${a.status === "approved" ? "chip-ok" : "chip-bad"}`}>{a.status}</span></div>)}
       </div>
     </div>
   );

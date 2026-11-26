@@ -17,8 +17,11 @@ export interface Batch {
   qty: number; // pcs
 }
 
+export type ProductStatus = "active" | "inactive" | "unlisted";
+
 export interface Product {
   id: string;
+  status: ProductStatus; // unlisted = arrived or ordered but not priced yet; inactive = hidden from bookers
   code: string;
   name: string;
   brand: string;
@@ -194,7 +197,7 @@ export interface StockAdj {
 
 export interface Approval {
   id: string;
-  kind: "order" | "adjustment";
+  kind: "order" | "adjustment" | "price";
   refId: string;
   text: string;
   detail: string;
@@ -215,4 +218,17 @@ export interface Activity {
   id: string;
   at: number;
   text: string;
+}
+
+export interface PriceChange {
+  id: string;
+  batchId: string;
+  productId: string;
+  oldPrice: number;
+  newPrice: number;
+  pct: number;
+  note: string;
+  status: "applied" | "pending" | "rejected";
+  by: string;
+  at: number;
 }

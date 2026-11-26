@@ -5,11 +5,12 @@ import { CUSTOMERS, ORDERS, PAYMENTS, PRODUCTS, PURCHASES, RETURNS, SCHEMES, TRI
 import { orderDue, orderTotal, pcsOf, totals, unpaidOrders, withScheme } from "./calc";
 import type {
   Activity, Allocation, Approval, Customer, Line, Order, OrderStatus, Payment, Product, PurchaseOrder,
-  ReturnNote, ReturnReason, Role, Scheme, StockAdj, SupplierReturn, Trip, User,
+  PriceChange, ProductStatus, ReturnNote, ReturnReason, Role, Scheme, StockAdj, SupplierReturn, Trip, User,
 } from "./types";
 
 const uid = () => Math.random().toString(36).slice(2, 9);
 export const MAX_DISCOUNT = 5; // % above which the owner must approve
+export const PRICE_LIMIT = 10; // % price change above which the owner must approve
 export const ADJ_LIMIT = 20000; // Rs. stock-count variance above which the owner must approve
 
 const cloneP = (ps: Product[]) => ps.map((p) => ({ ...p, batches: p.batches.map((b) => ({ ...b })) }));
@@ -59,6 +60,7 @@ const seedState = () => ({
   supplierReturns: [] as SupplierReturn[],
   adjustments: [] as StockAdj[],
   approvals: [] as Approval[],
+  priceHistory: [] as PriceChange[],
   activity: [] as Activity[],
   seq: 43,
 });
@@ -77,6 +79,7 @@ interface State {
   supplierReturns: SupplierReturn[];
   adjustments: StockAdj[];
   approvals: Approval[];
+  priceHistory: PriceChange[];
   activity: Activity[];
   seq: number;
 
@@ -111,7 +114,7 @@ interface State {
   createSupplierReturn: (productId: string, qtyPcs: number, reason: string, by: string) => void;
 
   // stock in
-  createPO: (supplier: string, lines: { productId: string; ordered: number }[]) => void;
+  createPO: (supplier: string, lines: { productId: string; ordered: number }[], newItems?: NewItem[]) => void;
   receivePO: (id: string, rows: Record<number, { received: number; damaged: number; batch: string; expiry: string }>, by: string) => void;
   approvePO: (id: string) => void;
   cycleCount: (productId: string, counted: number, reason: string, by: string) => void;
@@ -121,14 +124,21 @@ interface State {
   rejectRequest: (id: string, by: string) => void;
 
   // masters
-  upsertProduct: (p: Product) => void;
-  deleteProduct: (id: string) => void;
+  upsertProduct: (p: Product, by?: string) => void;
+  setProductStatus: (id: string, status: ProductStatus) => void;
+  deleteProduct: (id: string) => boolean;
+  applyPrices: (changes: { productId: string; newPrice: number }[], by: string, note: string) => { applied: number; pending: number };
+  bulkPrice: (ids: string[], pct: number, by: string) => { applied: number; pending: number };
+  importProducts: (rows: ImportRow[], by: string) => { added: number; updated: number; pending: number };
   upsertCustomer: (c: Customer) => void;
   deleteCustomer: (id: string) => void;
   upsertScheme: (s: Scheme) => void;
   deleteScheme: (id: string) => void;
   setBookerTarget: (id: string, target: number) => void;
 }
+
+export interface NewItem { name: string; brand: string; packSize: number; costPrice: number; ordered: number }
+export interface ImportRow { code: string; name?: string; brand?: string; supplier?: string; packSize?: number; cartonPrice?: number; costPrice?: number; reorder?: number; leadDays?: number; bin?: string }
 
 const log = (s: State, text: string): Activity[] => [{ id: uid(), at: Date.now(), text }, ...s.activity].slice(0, 80);
 const stamp = (o: Order, status: OrderStatus, by: string) => [...o.trail, { status, at: Date.now(), by }];
@@ -377,11 +387,18 @@ export const useStore = create<State>()(
         });
       },
 
-      createPO: (supplier, lines) => {
+      createPO: (supplier, lines, newItems = []) => {
         const s = get();
+        const created: Product[] = newItems.map((n, i) => ({
+          id: `p${uid()}`, status: "unlisted", code: `NEW-${s.products.length + i + 1}`, name: n.name, brand: n.brand || supplier.split(" ")[0],
+          supplier, packSize: n.packSize, cartonPrice: 0, costPrice: n.costPrice, taxPct: 18, stock: 0, batches: [], damaged: 0, reserved: 0,
+          reorder: n.packSize * 5, leadDays: 5, bin: "", hue: Math.floor(Math.random() * 360),
+        }));
+        const all = [...lines, ...created.map((p, i) => ({ productId: p.id, ordered: newItems[i].ordered }))];
         set({
-          purchases: [{ id: `po${uid()}`, folio: `PO-${7012 + s.purchases.length - 2}`, supplier, lines, status: "ordered", createdAt: Date.now() }, ...s.purchases],
-          activity: log(s, `Purchase order sent to ${supplier}`),
+          products: [...created, ...s.products],
+          purchases: [{ id: `po${uid()}`, folio: `PO-${7012 + s.purchases.length - 2}`, supplier, lines: all, status: "ordered", createdAt: Date.now() }, ...s.purchases],
+          activity: log(s, `Purchase order sent to ${supplier}${created.length ? ` (${created.length} new item${created.length > 1 ? "s" : ""} to be listed)` : ""}`),
         });
       },
 
@@ -440,7 +457,14 @@ export const useStore = create<State>()(
         const a = s.approvals.find((x) => x.id === id);
         if (!a || a.status !== "pending") return;
         if (a.kind === "order") get().approveOrder(a.refId, by, true);
-        else {
+        else if (a.kind === "price") {
+          const st = get();
+          const ch = st.priceHistory.filter((c) => c.batchId === a.refId && c.status === "pending");
+          set({
+            products: st.products.map((p) => { const c = ch.find((x) => x.productId === p.id); return c ? { ...p, cartonPrice: c.newPrice } : p; }),
+            priceHistory: st.priceHistory.map((c) => (c.batchId === a.refId && c.status === "pending" ? { ...c, status: "applied" } : c)),
+          });
+        } else {
           const adj = s.adjustments.find((x) => x.id === a.refId);
           if (adj) set({ products: applyDelta(get().products, adj.productId, adj.deltaPcs), adjustments: get().adjustments.map((x) => (x.id === adj.id ? { ...x, status: "applied" } : x)) });
         }
@@ -451,19 +475,105 @@ export const useStore = create<State>()(
         const a = s.approvals.find((x) => x.id === id);
         if (!a || a.status !== "pending") return;
         if (a.kind === "order") get().cancelOrder(a.refId, by);
+        else if (a.kind === "price") set({ priceHistory: s.priceHistory.map((c) => (c.batchId === a.refId && c.status === "pending" ? { ...c, status: "rejected" } : c)) });
         else set({ adjustments: s.adjustments.map((x) => (x.id === a.refId ? { ...x, status: "rejected" } : x)) });
         set((st) => ({ approvals: st.approvals.map((x) => (x.id === id ? { ...x, status: "rejected" } : x)), activity: log(st, `Owner rejected ${a.text}`) }));
       },
 
-      upsertProduct: (p) => set((s) => ({ products: s.products.some((x) => x.id === p.id) ? s.products.map((x) => (x.id === p.id ? { ...x, ...p, batches: x.batches, stock: x.stock } : x)) : [p, ...s.products] })),
-      deleteProduct: (id) => set((s) => ({ products: s.products.filter((x) => x.id !== id), schemes: s.schemes.filter((x) => x.productId !== id) })),
+      upsertProduct: (p, by = "—") => {
+        const s = get();
+        const old = s.products.find((x) => x.id === p.id);
+        if (!old) {
+          set({ products: [{ ...p, cartonPrice: 0 }, ...s.products] });
+          if (p.cartonPrice > 0) get().applyPrices([{ productId: p.id, newPrice: p.cartonPrice }], by, "Listed");
+          return;
+        }
+        const { cartonPrice: newPrice, ...rest } = p;
+        set({ products: s.products.map((x) => (x.id === p.id ? { ...x, ...rest, batches: x.batches, stock: x.stock, damaged: x.damaged, reserved: x.reserved } : x)) });
+        if (newPrice !== old.cartonPrice) get().applyPrices([{ productId: p.id, newPrice }], by, old.cartonPrice === 0 ? "Listed" : "Edited");
+      },
+      setProductStatus: (id, status) => set((s) => ({ products: s.products.map((x) => (x.id === id ? { ...x, status } : x)) })),
+      deleteProduct: (id) => {
+        const s = get();
+        const p = s.products.find((x) => x.id === id);
+        const used = !!p && (p.stock > 0 || p.damaged > 0 || s.orders.some((o) => o.lines.some((l) => l.productId === id)) || s.purchases.some((o) => o.lines.some((l) => l.productId === id)));
+        if (!p || used) return false;
+        set({ products: s.products.filter((x) => x.id !== id), schemes: s.schemes.filter((x) => x.productId !== id) });
+        return true;
+      },
+      applyPrices: (changes, by, note) => {
+        const s = get();
+        const batchId = uid();
+        const now = Date.now();
+        const entries: PriceChange[] = [];
+        for (const c of changes) {
+          const p = s.products.find((x) => x.id === c.productId);
+          if (!p || c.newPrice === p.cartonPrice || c.newPrice < 0) continue;
+          const pct = p.cartonPrice > 0 ? ((c.newPrice - p.cartonPrice) / p.cartonPrice) * 100 : 0;
+          const big = p.cartonPrice > 0 && Math.abs(pct) > PRICE_LIMIT;
+          entries.push({ id: uid(), batchId, productId: p.id, oldPrice: p.cartonPrice, newPrice: c.newPrice, pct, note, status: big ? "pending" : "applied", by, at: now });
+        }
+        const applied = entries.filter((e) => e.status === "applied");
+        const pending = entries.filter((e) => e.status === "pending");
+        if (!entries.length) return { applied: 0, pending: 0 };
+        const names = (es: PriceChange[]) => es.slice(0, 3).map((e) => `${s.products.find((p) => p.id === e.productId)?.name}: ${e.oldPrice.toLocaleString()} → ${e.newPrice.toLocaleString()} (${e.pct > 0 ? "+" : ""}${e.pct.toFixed(1)}%)`).join(" · ") + (es.length > 3 ? ` · +${es.length - 3} more` : "");
+        set({
+          products: s.products.map((p) => { const e = applied.find((x) => x.productId === p.id); return e ? { ...p, cartonPrice: e.newPrice } : p; }),
+          priceHistory: [...entries, ...s.priceHistory],
+          approvals: pending.length ? [{
+            id: uid(), kind: "price", refId: batchId,
+            text: pending.length === 1 ? `Price change: ${s.products.find((p) => p.id === pending[0].productId)?.name}` : `Price update: ${pending.length} products`,
+            detail: names(pending), amount: 0, by, at: now, status: "pending",
+          }, ...s.approvals] : s.approvals,
+          activity: log(s, `${by} changed prices on ${applied.length + pending.length} product${applied.length + pending.length > 1 ? "s" : ""}${pending.length ? ` (${pending.length} sent to owner)` : ""}`),
+        });
+        return { applied: applied.length, pending: pending.length };
+      },
+      bulkPrice: (ids, pct, by) => {
+        const s = get();
+        return get().applyPrices(
+          ids.map((id) => ({ productId: id, newPrice: Math.round((s.products.find((p) => p.id === id)?.cartonPrice ?? 0) * (1 + pct / 100)) })),
+          by, `Bulk ${pct > 0 ? "+" : ""}${pct}%`
+        );
+      },
+      importProducts: (rows, by) => {
+        const s = get();
+        let added = 0, updated = 0;
+        const priceChanges: { productId: string; newPrice: number }[] = [];
+        let products = [...s.products];
+        for (const r of rows) {
+          const ex = products.find((p) => p.code.toLowerCase() === r.code.toLowerCase());
+          if (ex) {
+            updated++;
+            products = products.map((p) => p.id === ex.id ? {
+              ...p, name: r.name || p.name, brand: r.brand || p.brand, supplier: r.supplier || p.supplier,
+              packSize: r.packSize || p.packSize, costPrice: r.costPrice ?? p.costPrice, reorder: r.reorder ?? p.reorder,
+              leadDays: r.leadDays ?? p.leadDays, bin: r.bin ?? p.bin,
+            } : p);
+            if (r.cartonPrice !== undefined) priceChanges.push({ productId: ex.id, newPrice: r.cartonPrice });
+          } else {
+            added++;
+            const id = `p${uid()}`;
+            products = [{
+              id, status: (r.cartonPrice ?? 0) > 0 ? "active" : "unlisted", code: r.code, name: r.name || r.code, brand: r.brand || "", supplier: r.supplier || "",
+              packSize: r.packSize || 12, cartonPrice: 0, costPrice: r.costPrice ?? 0, taxPct: 18, stock: 0, batches: [], damaged: 0, reserved: 0,
+              reorder: r.reorder ?? 120, leadDays: r.leadDays ?? 5, bin: r.bin ?? "", hue: Math.floor(Math.random() * 360),
+            }, ...products];
+            if ((r.cartonPrice ?? 0) > 0) priceChanges.push({ productId: id, newPrice: r.cartonPrice! });
+          }
+        }
+        set({ products });
+        const res = get().applyPrices(priceChanges, by, "Imported");
+        set((st) => ({ activity: log(st, `${by} imported products: ${added} new, ${updated} updated`) }));
+        return { added, updated, pending: res.pending };
+      },
       upsertCustomer: (c) => set((s) => ({ customers: s.customers.some((x) => x.id === c.id) ? s.customers.map((x) => (x.id === c.id ? c : x)) : [c, ...s.customers] })),
       deleteCustomer: (id) => set((s) => ({ customers: s.customers.filter((x) => x.id !== id) })),
       upsertScheme: (sc) => set((s) => ({ schemes: s.schemes.some((x) => x.id === sc.id) ? s.schemes.map((x) => (x.id === sc.id ? sc : x)) : [sc, ...s.schemes] })),
       deleteScheme: (id) => set((s) => ({ schemes: s.schemes.filter((x) => x.id !== id) })),
       setBookerTarget: (id, target) => set((s) => ({ users: s.users.map((u) => (u.id === id ? { ...u, target } : u)) })),
     }),
-    { name: "zarie-dms-v2", version: 2 }
+    { name: "zarie-dms-v3", version: 3 }
   )
 );
 

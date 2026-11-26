@@ -111,7 +111,8 @@ function RouteView({ onStart }: { onStart: (c: string) => void }) {
 function NewOrderM({ customerId, onBack, onDone }: { customerId: string; onBack: () => void; onDone: () => void }) {
   const user = useUser()!;
   const c = useStore((s) => s.customers.find((x) => x.id === customerId))!;
-  const products = useStore((s) => s.products);
+  const allProducts = useStore((s) => s.products);
+  const products = allProducts.filter((p) => p.status === "active");
   const orders = useStore((s) => s.orders);
   const create = useStore((s) => s.createOrder);
   const schemes = useStore((s) => s.schemes);
@@ -201,7 +202,7 @@ function OrdersView() {
 }
 
 function StockView() {
-  const products = useStore((s) => s.products);
+  const products = useStore((s) => s.products).filter((p) => p.status === "active");
   const [q, setQ] = useState("");
   return (
     <div className="p-4">

@@ -4,8 +4,8 @@ import { Modal } from "./ui";
 
 export type FieldDef<T> = { key: keyof T & string; label: string; type?: "text" | "number" | "select"; options?: [string, string][] };
 
-export default function MasterForm<T extends object>({ title, initial, fields, onSave, onClose }: {
-  title: string; initial: T; fields: FieldDef<T>[]; onSave: (v: T) => void; onClose: () => void;
+export default function MasterForm<T extends object>({ title, initial, fields, onSave, onClose, footer }: {
+  title: string; initial: T; fields: FieldDef<T>[]; onSave: (v: T) => void; onClose: () => void; footer?: (v: T) => React.ReactNode;
 }) {
   const [v, setV] = useState<T>(initial);
   const submit = () => onSave(v);
@@ -25,6 +25,7 @@ export default function MasterForm<T extends object>({ title, initial, fields, o
             )}
           </label>
         ))}
+        {footer && <div className="col-span-2">{footer(v)}</div>}
         <div className="col-span-2 mt-2 flex justify-end gap-2">
           <button type="button" className="btn" onClick={onClose}>Cancel</button>
           <button type="submit" className="btn btn-primary">Save</button>

@@ -19,7 +19,7 @@ const P = (
 ): Product => {
   const bs = batches.map(([no, expiry, ctn], i) => ({ id: `${id}-b${i}`, no, expiry, qty: ctn * packSize }));
   return {
-    id, code, name, brand, supplier, packSize, cartonPrice, costPrice: Math.round(cartonPrice * costPct),
+    id, status: "active", code, name, brand, supplier, packSize, cartonPrice, costPrice: Math.round(cartonPrice * costPct),
     taxPct: 18, batches: bs, stock: bs.reduce((s, b) => s + b.qty, 0), damaged: 0, reserved: 0,
     reorder: reorderCtn * packSize, leadDays, bin, hue,
   };
@@ -37,6 +37,7 @@ export const PRODUCTS: Product[] = [
   P("p9", "SH-03", "Sunsilk Shampoo 200ml", "Unilever", "Unilever Pakistan", 24, 6100, 0.84, [["SH2802", "2028-02", 30]], 12, 290, "A-05", 5),
   P("p10", "RF-08", "Rafhan Corn Oil 3L", "Rafhan", "Rafhan Maize", 6, 7900, 0.88, [["RF2704", "2027-04", 9]], 10, 45, "C-02", 6),
   P("p11", "ML-12", "Meezan Biscuits Family", "Meezan", "Meezan Foods", 36, 3900, 0.89, [["ML2612", "2026-12", 25], ["ML2703", "2027-03", 45]], 20, 25, "D-02", 4),
+  { id: "p13", status: "unlisted", code: "LY-21", name: "Lays Masala 50g", brand: "PepsiCo", supplier: "PepsiCo Pakistan", packSize: 48, cartonPrice: 0, costPrice: 3150, taxPct: 18, stock: 0, batches: [], damaged: 0, reserved: 0, reorder: 240, leadDays: 5, bin: "", hue: 38 },
   P("p12", "SG-14", "Shield Dish Wash 500ml", "Shield", "Shield Chemicals", 12, 4800, 0.86, [["SG2708", "2027-08", 22]], 8, 160, "A-06", 7),
 ];
 
@@ -99,6 +100,10 @@ export const PURCHASES: PurchaseOrder[] = [
   {
     id: "po1", folio: "PO-7011", supplier: "Unilever Pakistan", status: "ordered", createdAt: now - 30 * h,
     lines: [{ productId: "p3", ordered: 40 }, { productId: "p5", ordered: 30 }, { productId: "p1", ordered: 25 }],
+  },
+  {
+    id: "po3", folio: "PO-7012", supplier: "PepsiCo Pakistan", status: "ordered", createdAt: now - 6 * h,
+    lines: [{ productId: "p13", ordered: 30 }],
   },
   {
     id: "po2", folio: "PO-7010", supplier: "Tapal Tea Ltd", status: "received", createdAt: now - 54 * h,

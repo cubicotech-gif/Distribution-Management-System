@@ -29,7 +29,8 @@ function parsePaste(text: string, products: Product[]): { lines: Line[]; missed:
 
 export default function NewOrder({ onClose, onCreated, defaultCustomer }: { onClose: () => void; onCreated: (id: string) => void; defaultCustomer?: string }) {
   const customers = useStore((s) => s.customers);
-  const products = useStore((s) => s.products);
+  const allProducts = useStore((s) => s.products);
+  const products = allProducts.filter((p) => p.status === "active");
   const orders = useStore((s) => s.orders);
   const create = useStore((s) => s.createOrder);
   const schemes = useStore((s) => s.schemes);
@@ -121,7 +122,7 @@ export default function NewOrder({ onClose, onCreated, defaultCustomer }: { onCl
               <thead><tr className="th text-left"><th className="px-3 py-2">Product</th><th>Unit</th><th className="text-right">Qty</th><th className="text-right">Rate</th><th className="text-right">Amount</th><th /></tr></thead>
               <tbody>
                 {lines.map((l, i) => {
-                  const p = products.find((x) => x.id === l.productId)!;
+                  const p = allProducts.find((x) => x.id === l.productId)!;
                   return (
                     <tr key={i} className="border-t border-line">
                       <td className="px-3 py-1.5"><div className="flex items-center gap-2"><Thumb p={p} size={22} /><div>{p.name}{priced[i].scheme && <div className="text-[10.5px] font-medium text-accent">{priced[i].scheme}</div>}</div></div></td>
