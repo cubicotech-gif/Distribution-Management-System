@@ -165,11 +165,11 @@ const stamp = (o: Order, status: OrderStatus, by: string) => [...o.trail, { stat
 export const useStore = create<State>()(
   persist(
     (set, get) => ({
-      userId: null,
+      userId: typeof window !== "undefined" ? (() => { try { return sessionStorage.getItem("dms-user"); } catch { return null; } })() : null,
       ...seedState(),
 
-      login: (id) => set({ userId: id }),
-      logout: () => set({ userId: null }),
+      login: (id) => { try { sessionStorage.setItem("dms-user", id); } catch {} set({ userId: id }); },
+      logout: () => { try { sessionStorage.removeItem("dms-user"); } catch {} set({ userId: null }); },
       reset: () => set({ ...seedState() }),
 
       createOrder: (customerId, lines, bookerId, note) => {
@@ -685,7 +685,12 @@ export const useStore = create<State>()(
       deleteScheme: (id) => set((s) => ({ schemes: s.schemes.filter((x) => x.id !== id), changeLog: aud(s, "scheme", "Deleted a scheme") })),
       setBookerTarget: (id, target) => set((s) => ({ users: s.users.map((u) => (u.id === id ? { ...u, target } : u)) })),
     }),
-    { name: "zarie-dms-v4", version: 4 }
+    {
+      name: "zarie-dms-v5",
+      version: 5,
+      // The signed-in user belongs to this tab only; the business data is shared by every tab.
+      partialize: (s) => Object.fromEntries(Object.entries(s).filter(([k]) => k !== "userId")) as unknown as State,
+    }
   )
 );
 
@@ -719,3 +724,10 @@ export const HOME: Record<Role, string> = {
   recovery: "/m",
 };
 export type { Role };
+
+// Keep open tabs in step: when another tab changes the data, pick it up straight away.
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (e) => {
+    if (e.key === "zarie-dms-v5") useStore.persist.rehydrate();
+  });
+}
