@@ -27,6 +27,9 @@ export default function BackOffice() {
   const backorders = orders.filter((o) => o.backorderOf && (o.status === "booked" || o.status === "hold")).length;
   const setStatus = useStore((s) => s.setCustomerStatus);
   const holdCandidates = customers.filter((c) => c.status !== "blocked" && c.type === "credit" && unpaidOrders(orders, c.id).some((o) => (Date.now() - invoiceDate(o)) / 86400000 > c.creditDays + 30)).slice(0, 4);
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const promisesDue = customers.filter((c) => c.promise && c.promise.date <= todayIso && c.balance > 0).length;
+  const chequesInHand = payments.filter((p) => p.mode === "cheque" && (p.cheque?.status ?? "received") === "received");
   const pendingCN = returns.filter((r) => r.status !== "graded").length;
   const unlisted = products.filter((p) => p.status === "unlisted");
   const arrived = unlisted.filter((p) => p.stock > 0);
@@ -57,6 +60,8 @@ export default function BackOffice() {
         <Card title="Today so far">
           <Row><span>Collected</span><span className="num font-semibold">Rs. {fmt(collected)}</span></Row>
           <Row><span>Invoices issued</span><span className="num font-semibold">{orders.filter((o) => o.trail.some((t) => t.status === "invoiced" && t.at >= mid.getTime())).length}</span></Row>
+          <Row><span>Promises due or missed</span><Link href="/recovery" className="num font-semibold text-accent">{promisesDue}</Link></Row>
+          <Row><span>Cheques not yet banked</span><Link href="/accounts" className="num font-semibold text-accent">{chequesInHand.length} · Rs. {fmt(chequesInHand.reduce((a, p) => a + p.amount, 0))}</Link></Row>
           <Row><span>Returns waiting for warehouse</span><span className="num font-semibold">{pendingCN}</span></Row>
           <Row><span>Active credit customers</span><span className="num font-semibold">{customers.filter((c) => c.type === "credit").length}</span></Row>
         </Card>

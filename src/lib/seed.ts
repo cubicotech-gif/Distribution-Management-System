@@ -187,7 +187,25 @@ export const GRNS: Grn[] = [
   },
 ];
 
-export const PAYMENTS: Payment[] = [];
+const dAgo = (d: number) => Date.now() - d * 86400000;
+const iso = (d: number) => new Date(dAgo(d)).toISOString().slice(0, 10);
+export const PAYMENTS: Payment[] = [
+  { id: "pay1", customerId: "c1", amount: 40000, mode: "cheque", at: dAgo(1), by: "FA", cheque: { no: "884201", bank: "HBL Anarkali", date: iso(1), status: "received", statusAt: dAgo(1) } },
+  { id: "pay2", customerId: "c3", amount: 35000, mode: "cheque", at: dAgo(2), by: "FA", cheque: { no: "552310", bank: "Meezan Mozang", date: iso(2), status: "received", statusAt: dAgo(2) } },
+  { id: "pay3", customerId: "c7", amount: 60000, mode: "cheque", at: dAgo(4), by: "FA", cheque: { no: "190077", bank: "UBL Gulberg", date: iso(4), status: "deposited", slip: "DEP-3101", statusAt: dAgo(3) } },
+  { id: "pay4", customerId: "c5", amount: 25000, mode: "cheque", at: dAgo(8), by: "FA", cheque: { no: "334455", bank: "Allied Mozang", date: iso(8), status: "cleared", slip: "DEP-3100", statusAt: dAgo(5) } },
+  { id: "pay5", customerId: "c2", amount: 18000, mode: "cash", at: dAgo(0.2), by: "FA" },
+  { id: "pay6", customerId: "c4", amount: 9500, mode: "online", at: dAgo(1.5), by: "FA" },
+];
+{
+  const set = (id: string, d: number, amount: number, note: string) => {
+    const c = CUSTOMERS.find((x) => x.id === id);
+    if (c) { c.promise = { date: iso(-d), amount, by: "FA", at: dAgo(3) }; c.followUps = [{ at: dAgo(3), by: "FA", text: note }]; }
+  };
+  set("c3", 1, 50000, "Owner said he will pay half after the Friday market. Promised Rs. 50,000");
+  set("c1", 0, 60000, "Cheque ready, will hand over today. Promised Rs. 60,000");
+  set("c5", -1, 30000, "Said payment was due yesterday, asked for two more days");
+}
 
 export const SCHEMES: Scheme[] = [
   { id: "s1", productId: "p1", type: "discount", minCtn: 10, discPct: 2, freeCtn: 0 },

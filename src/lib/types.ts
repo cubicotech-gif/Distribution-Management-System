@@ -64,6 +64,8 @@ export interface Customer {
   creditDays: number;
   maxDiscount?: number; // % this customer may get without the owner (company limit when empty)
   termsNote?: string; // special terms agreed with this customer
+  promise?: { date: string; amount: number; by: string; at: number; broken?: boolean }; // promise to pay, date is yyyy-mm-dd
+  followUps?: { at: number; by: string; text: string }[];
   holdLog?: { at: number; by: string; action: "hold" | "release"; reason: string }[];
   balance: number;
   oldestDue: number; // age in days of the oldest opening balance
@@ -158,6 +160,9 @@ export interface Trip {
   closedAt?: number;
   expectedCash?: number;
   countedCash?: number;
+  diffReason?: string;
+  diffBy?: string; // who is responsible for a shortage or excess
+  settledBy?: string;
   seal?: string;
   gatePass?: string;
 }
@@ -214,6 +219,7 @@ export interface Payment {
   mode: "cash" | "cheque" | "online";
   at: number;
   by: string;
+  cheque?: { no: string; bank: string; date: string; status: "received" | "deposited" | "cleared" | "bounced"; slip?: string; statusAt: number; note?: string };
 }
 
 export type ReturnReason = "damaged" | "expired" | "wrong item" | "old packaging" | "refused";

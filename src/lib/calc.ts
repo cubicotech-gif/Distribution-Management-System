@@ -168,7 +168,7 @@ export function ledger(c: Customer, orders: Order[], payments: Payment[], return
     if (o.customerId !== c.id || !invoiced(o) || c.type === "cash") continue;
     rows.push({ at: invoiceDate(o), ref: o.invoiceNo ?? o.folio, text: `Invoice · ${o.folio}`, debit: orderTotal(o), credit: 0 });
   }
-  for (const p of payments) if (p.customerId === c.id && c.type === "credit") rows.push({ at: p.at, ref: "RCPT", text: `Payment (${p.mode})`, debit: 0, credit: p.amount });
+  for (const p of payments) if (p.customerId === c.id && c.type === "credit") { rows.push({ at: p.at, ref: "RCPT", text: `Payment (${p.mode}${p.cheque?.no ? " " + p.cheque.no : ""})`, debit: 0, credit: p.amount }); if (p.cheque?.status === "bounced") rows.push({ at: p.cheque.statusAt, ref: "BOUNCE", text: `Cheque ${p.cheque.no || ""} bounced`, debit: p.amount, credit: 0 }); }
   for (const r of returns) if (r.customerId === c.id && r.status === "graded" && r.credit && c.type === "credit") rows.push({ at: r.gradedAt ?? r.at, ref: r.folio, text: "Credit note (return)", debit: 0, credit: r.value ?? 0 });
   for (const n of notes) if (n.customerId === c.id && n.status === "issued" && c.type === "credit") rows.push({ at: n.at, ref: n.folio, text: n.kind === "credit" ? `Credit note · ${n.reason}` : `Debit note · ${n.reason}`, debit: n.kind === "debit" ? n.amount : 0, credit: n.kind === "credit" ? n.amount : 0 });
   rows.sort((a, b) => a.at - b.at);

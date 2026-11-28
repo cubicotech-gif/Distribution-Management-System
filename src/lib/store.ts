@@ -140,13 +140,16 @@ interface State {
   // dispatch
   createTrip: (orderIds: string[], vehicle: string, driverId: string, keId: string, by: string) => void;
   dispatchTrip: (id: string, by: string) => void;
-  settleTrip: (id: string, counted: number, by: string) => void;
+  settleTrip: (id: string, counted: number, by: string, diff?: { reason: string; who: string }) => void;
   deliverOrder: (id: string, by: string) => void;
   signOrder: (id: string, dataUrl: string) => void;
   fileOrder: (id: string) => void;
 
   // money
-  collect: (customerId: string, amount: number, by: string, orderId?: string, mode?: Payment["mode"]) => void;
+  collect: (customerId: string, amount: number, by: string, orderId?: string, mode?: Payment["mode"], cheque?: { no: string; bank: string; date: string }) => void;
+  chequeAction: (ids: string[], action: "deposit" | "clear" | "bounce", by: string, note?: string) => string | undefined;
+  setPromise: (customerId: string, date: string, amount: number, by: string) => void;
+  addFollowUp: (customerId: string, text: string, by: string) => void;
 
   // returns
   reportReturn: (orderId: string, productId: string, qtyPcs: number, reason: ReturnReason, by: string) => void;
@@ -514,14 +517,14 @@ export const useStore = create<State>()(
           trips: s.trips.map((t) => (t.id === id ? { ...t, status: "out", dispatchedAt: Date.now(), seal: `SL-${10000 + Math.floor(Math.random() * 89999)}`, gatePass: `GP-${200 + s.trips.filter((x) => x.gatePass).length + 1}` } : t)),
           activity: log(s, `${s.trips.find((t) => t.id === id)?.folio} left the depot (${by})`),
         })),
-      settleTrip: (id, counted, by) => {
+      settleTrip: (id, counted, by, diff) => {
         const s = get();
         const t = s.trips.find((x) => x.id === id);
         if (!t) return;
         const expected = s.payments.filter((p) => p.tripId === id && p.mode === "cash").reduce((a, p) => a + p.amount, 0);
         set({
-          trips: s.trips.map((x) => (x.id === id ? { ...x, status: "closed", closedAt: Date.now(), expectedCash: expected, countedCash: counted } : x)),
-          activity: log(s, `${t.folio} settled by ${by}. Cash ${counted === expected ? "matched" : `differs by Rs. ${Math.round(counted - expected).toLocaleString()}`}`),
+          trips: s.trips.map((x) => (x.id === id ? { ...x, status: "closed", closedAt: Date.now(), expectedCash: expected, countedCash: counted, settledBy: by, diffReason: diff?.reason, diffBy: diff?.who } : x)),
+          activity: log(s, `${t.folio} settled by ${by}. Cash ${counted === expected ? "matched" : `differs by Rs. ${Math.round(counted - expected).toLocaleString()}${diff ? ` (${diff.reason}, ${diff.who})` : ""}`}`),
         });
       },
 
@@ -536,7 +539,7 @@ export const useStore = create<State>()(
       signOrder: (id, dataUrl) => set((st) => ({ orders: st.orders.map((o) => (o.id === id ? { ...o, signature: dataUrl } : o)) })),
       fileOrder: (id) => set((st) => ({ orders: st.orders.map((o) => (o.id === id ? { ...o, filed: true } : o)) })),
 
-      collect: (customerId, amount, by, orderId, mode = "cash") => {
+      collect: (customerId, amount, by, orderId, mode = "cash", cheque) => {
         const s = get();
         const c = s.customers.find((x) => x.id === customerId);
         if (!c || amount <= 0) return;
@@ -554,17 +557,58 @@ export const useStore = create<State>()(
           o.paid += pay; left -= pay;
           if (orderDue(o) <= 1 && o.status === "delivered") { o.status = "paid"; o.trail = stamp(o, "paid", by); }
         }
-        const pay: Payment = { id: uid(), customerId, orderId, tripId: target?.tripId, amount, mode, at: Date.now(), by };
+        const pay: Payment = { id: uid(), customerId, orderId, tripId: target?.tripId, amount, mode, at: Date.now(), by, cheque: mode === "cheque" ? { no: cheque?.no ?? "", bank: cheque?.bank ?? "", date: cheque?.date ?? new Date().toISOString().slice(0, 10), status: "received", statusAt: Date.now() } : undefined };
         set({
           payments: [pay, ...s.payments],
           orders,
           customers: s.customers.map((x) => {
             if (x.id !== customerId || x.type === "cash") return x;
             const bal = Math.max(0, x.balance - amount);
-            return { ...x, balance: bal, oldestDue: bal === 0 ? 0 : x.oldestDue };
+            return { ...x, balance: bal, oldestDue: bal === 0 ? 0 : x.oldestDue, promise: bal === 0 || (x.promise && amount >= x.promise.amount) ? undefined : x.promise };
           }),
           activity: log(s, `Rs. ${Math.round(amount).toLocaleString()} ${mode} received from ${c.name}`),
         });
+      },
+
+      chequeAction: (ids, action, by, note) => {
+        const s = get();
+        const sel = s.payments.filter((p) => ids.includes(p.id) && p.mode === "cheque");
+        if (!sel.length) return undefined;
+        const slipNo = action === "deposit" ? `DEP-${3100 + new Set(s.payments.map((p) => p.cheque?.slip).filter(Boolean)).size + 1}` : undefined;
+        const next = action === "deposit" ? "deposited" : action === "clear" ? "cleared" : "bounced";
+        let orders = s.orders;
+        let customers = s.customers;
+        for (const p of sel) {
+          if (action !== "bounce") continue;
+          // put the money back on the customer's account, newest paid invoice first
+          let left = p.amount;
+          orders = orders.map((o) => ({ ...o }));
+          const paidOnes = orders.filter((o) => o.customerId === p.customerId && o.paid > 0).sort((a, b) => b.createdAt - a.createdAt);
+          for (const o of paidOnes) { if (left <= 0) break; const back = Math.min(o.paid, left); o.paid -= back; left -= back; if (o.status === "paid" && orderDue(o) > 1) o.status = "delivered"; }
+          customers = customers.map((x) => (x.id === p.customerId && x.type === "credit" ? { ...x, balance: x.balance + p.amount, oldestDue: Math.max(x.oldestDue, 1) } : x));
+        }
+        const names = sel.map((p) => s.customers.find((c) => c.id === p.customerId)?.name).filter(Boolean).join(", ");
+        set({
+          payments: s.payments.map((p) => (ids.includes(p.id) && p.mode === "cheque" ? { ...p, cheque: { no: p.cheque?.no ?? "", bank: p.cheque?.bank ?? "", date: p.cheque?.date ?? "", ...p.cheque, status: next, slip: slipNo ?? p.cheque?.slip, statusAt: Date.now(), note: note ?? p.cheque?.note } } : p)),
+          orders, customers,
+          activity: log(s, `${by} marked ${sel.length} cheque${sel.length > 1 ? "s" : ""} ${next}${slipNo ? ` (slip ${slipNo})` : ""}: ${names}${action === "bounce" ? ". Amount put back on the customer's account" : ""}`),
+        });
+        return slipNo;
+      },
+
+      setPromise: (customerId, date, amount, by) => {
+        const s = get();
+        const c = s.customers.find((x) => x.id === customerId);
+        if (!c) return;
+        set({
+          customers: s.customers.map((x) => (x.id === customerId ? { ...x, promise: { date, amount, by, at: Date.now() }, followUps: [{ at: Date.now(), by, text: `Promised Rs. ${Math.round(amount).toLocaleString()} by ${date}` }, ...(x.followUps ?? [])] } : x)),
+          activity: log(s, `${by} noted promise to pay from ${c.name}: Rs. ${Math.round(amount).toLocaleString()} by ${date}`),
+        });
+      },
+
+      addFollowUp: (customerId, text, by) => {
+        const s = get();
+        set({ customers: s.customers.map((x) => (x.id === customerId ? { ...x, followUps: [{ at: Date.now(), by, text }, ...(x.followUps ?? [])] } : x)) });
       },
 
       reportReturn: (orderId, productId, qtyPcs, reason, by) => {
@@ -1136,8 +1180,8 @@ export const useStore = create<State>()(
       setBookerTarget: (id, target) => set((s) => ({ users: s.users.map((u) => (u.id === id ? { ...u, target } : u)) })),
     }),
     {
-      name: "zarie-dms-v12",
-      version: 12,
+      name: "zarie-dms-v13",
+      version: 13,
       // The signed-in user belongs to this tab only; the business data is shared by every tab.
       partialize: (s) => Object.fromEntries(Object.entries(s).filter(([k]) => k !== "userId")) as unknown as State,
     }
@@ -1190,6 +1234,6 @@ export type { Role };
 // Keep open tabs in step: when another tab changes the data, pick it up straight away.
 if (typeof window !== "undefined") {
   window.addEventListener("storage", (e) => {
-    if (e.key === "zarie-dms-v12") useStore.persist.rehydrate();
+    if (e.key === "zarie-dms-v13") useStore.persist.rehydrate();
   });
 }

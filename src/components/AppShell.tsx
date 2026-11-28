@@ -26,6 +26,7 @@ const NAV: Nav[] = [
   { href: "/invoices", label: "Invoices", icon: FileText, roles: ["sales"], badge: "invoice" },
   { href: "/notes", label: "Credit & debit notes", icon: FileText, roles: ["sales", "admin"] },
   { href: "/recovery", label: "Recovery", icon: Wallet, roles: ["sales"] },
+  { href: "/accounts", label: "Accounts", icon: FileSpreadsheet, roles: ["sales", "admin"] },
   { href: "/settlements", label: "Trip settlement", icon: Landmark, roles: ["sales"], badge: "settle" },
   { href: "/customers", label: "Customers", icon: Users, roles: ["admin", "sales"] },
   { href: "/routes", label: "Routes", icon: MapPinned, roles: ["sales", "admin"] },

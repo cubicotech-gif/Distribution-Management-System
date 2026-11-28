@@ -138,9 +138,9 @@ Built department by department. Nothing moves to the next department until the c
 - ✅ Order edit history, order trail and customer-wise special terms (banner on the order)
 - ✅ Invoice: tax breakdown, rounding, amount in words, payment terms; ✅ invoice cancellation needs owner approval, then re-invoice with an -R suffix. ⬜ Per-line discount column
 - ✅ Credit and debit notes as printable documents (owner approval above Rs. 25,000); graded returns appear as credit notes. ⬜ PDF download
-- 🟡 Recovery. ⬜ Promise-to-pay dates, follow-up notes, reminder list per day, cheque register (received, deposited, cleared, bounced)
-- 🟡 Customer ledger CSV export done. ⬜ Day book, cash book, bank deposit slip
-- 🟡 Trip settlement. ⬜ Cash handover slip, shortage/excess handling
+- ✅ Recovery: promise-to-pay dates (missed promises flagged), follow-up notes, "Call today" list; ✅ cheque register (received, deposited, cleared, bounced; a bounce puts the amount back on the customer) with printable bank deposit slip
+- ✅ Customer ledger CSV export, day book, cash book (all with CSV)
+- ✅ Trip settlement: reason and responsible person required for any cash difference, printable cash handover slip
 - 🟡 Masters (customers, products, routes, price lists, schemes, suppliers, change log). ⬜ Booker and staff master, customer groups, GPS location
 
 ## D. Purchasing
