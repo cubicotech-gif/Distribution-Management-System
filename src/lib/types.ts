@@ -62,6 +62,9 @@ export interface Customer {
   priceListId: string;
   creditLimit: number;
   creditDays: number;
+  maxDiscount?: number; // % this customer may get without the owner (company limit when empty)
+  termsNote?: string; // special terms agreed with this customer
+  holdLog?: { at: number; by: string; action: "hold" | "release"; reason: string }[];
   balance: number;
   oldestDue: number; // age in days of the oldest opening balance
   phone: string;
@@ -135,6 +138,10 @@ export interface Order {
   packedAt?: number;
   packNote?: string;
   pickHold?: string; // reason the warehouse must not pick this order yet
+  backorderOf?: string; // folio of the order this one was split from
+  edits?: { at: number; by: string; text: string }[]; // changes made to the order lines
+  voided?: { invoiceNo: string; at: number; by: string; reason: string }[];
+  cancelPending?: boolean; // invoice cancellation waiting for the owner
   filed?: boolean;
 }
 
@@ -276,7 +283,7 @@ export interface StockAdj {
 
 export interface Approval {
   id: string;
-  kind: "order" | "adjustment" | "price" | "destruction";
+  kind: "order" | "adjustment" | "price" | "destruction" | "note" | "invoice";
   refId: string;
   text: string;
   detail: string;
@@ -431,4 +438,19 @@ export interface Handover {
   text: string;
   important: boolean;
   ackBy: string[]; // initials of people who have read it
+}
+
+export interface CreditNote {
+  id: string;
+  folio: string;
+  kind: "credit" | "debit";
+  customerId: string;
+  orderId?: string;
+  base: number; // before tax
+  taxPct: number;
+  amount: number; // including tax
+  reason: string;
+  status: "issued" | "pending" | "rejected";
+  by: string;
+  at: number;
 }

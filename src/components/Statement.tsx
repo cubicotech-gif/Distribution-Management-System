@@ -9,7 +9,14 @@ export default function Statement({ c, onClose }: { c: Customer; onClose: () => 
   const orders = useStore((s) => s.orders);
   const payments = useStore((s) => s.payments);
   const returns = useStore((s) => s.returns);
-  const rows = ledger(c, orders, payments, returns);
+  const notes = useStore((s) => s.notes);
+  const rows = ledger(c, orders, payments, returns, notes);
+  const exportCsv = () => {
+    const q = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`;
+    const lines = [["date", "ref", "description", "debit", "credit", "balance"].join(","), ...rows.map((r) => [new Date(r.at).toISOString().slice(0, 10), r.ref, r.text, r.debit || "", r.credit || "", Math.round(r.bal)].map(q).join(","))];
+    const url = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/csv" }));
+    const a = document.createElement("a"); a.href = url; a.download = `statement-${c.name.replace(/\W+/g, "-").toLowerCase()}.csv`; a.click(); URL.revokeObjectURL(url);
+  };
   const ag = aging(orders, c);
   return (
     <Modal open onClose={onClose} title={`Statement · ${c.name}`} width={720}>
@@ -25,8 +32,9 @@ export default function Statement({ c, onClose }: { c: Customer; onClose: () => 
           <div className="flex gap-4">{ag.map((x, i) => <span key={i}>{BUCKETS[i]}d: <b className="num">{fmt(x)}</b></span>)}</div>
           <div className="text-sm">Balance due <b className="num">Rs. {fmt(c.balance)}</b></div>
         </div>
+        {c.holdLog && c.holdLog.length > 0 && <div className="mt-3 text-[11px] text-[#4b5a52]"><b>Credit hold history:</b> {c.holdLog.map((h) => `${new Date(h.at).toLocaleDateString("en-GB")} ${h.action === "hold" ? "put on hold" : "released"} by ${h.by} (${h.reason})`).join(" · ")}</div>}
       </div>
-      <div className="no-print mt-4 flex justify-end gap-2"><button className="btn" onClick={onClose}>Close</button><button className="btn btn-primary" onClick={() => window.print()}><Printer size={14} /> Print</button></div>
+      <div className="no-print mt-4 flex justify-end gap-2"><button className="btn" onClick={onClose}>Close</button><button className="btn" onClick={exportCsv}>Export CSV</button><button className="btn btn-primary" onClick={() => window.print()}><Printer size={14} /> Print</button></div>
     </Modal>
   );
 }

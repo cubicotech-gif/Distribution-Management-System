@@ -32,6 +32,7 @@ export default function Customers() {
   const [target, setTarget] = useState("");
   const [edit, setEdit] = useState<Customer | null>(null);
   const [stmt, setStmt] = useState<Customer | null>(null);
+  const [holdFor, setHoldFor] = useState<{ ids: string[]; mode: "hold" | "release" } | null>(null);
   const bookers = users.filter((u) => u.role === "booker");
 
   const over = useMemo(() => Object.fromEntries(customers.map((c) => [c.id, overdueAmount(orders, c)])), [customers, orders]);
@@ -52,7 +53,7 @@ export default function Customers() {
       <button className="btn h-7" onClick={() => setStmt(c)}><FileText size={13} /></button>
       {canEdit && <>
         <button className="btn h-7 px-2" title="Edit" onClick={() => setEdit(c)}><Pencil size={13} /></button>
-        <button className="btn h-7 px-2" title={c.status === "blocked" ? "Unblock" : "Block new orders"} onClick={() => { if (c.status === "blocked") { setStatus([c.id], "active"); toast(`${c.name} unblocked`, { undo: () => setStatus([c.id], "blocked", c.blockedReason) }); } else { setStatus([c.id], "blocked", c.balance > 0 ? "Payment overdue" : "Blocked by back office"); toast(`${c.name} blocked. Bookers cannot take new orders`, { undo: () => setStatus([c.id], "active") }); } }}>{c.status === "blocked" ? <CheckCircle2 size={13} /> : <Ban size={13} />}</button>
+        <button className="btn h-7 px-2" title={c.status === "blocked" ? "Unblock" : "Block new orders"} onClick={() => setHoldFor({ ids: [c.id], mode: c.status === "blocked" ? "release" : "hold" })}>{c.status === "blocked" ? <CheckCircle2 size={13} /> : <Ban size={13} />}</button>
         <button className="btn btn-danger h-7 px-2" title="Delete" onClick={async () => { if (await ask({ title: `Delete ${c.name}?`, body: "This only works for customers with no orders and no balance.", confirm: "Delete", danger: true })) toast(del(c.id) ? `${c.name} deleted` : "This customer has orders or a balance. Block it instead."); }}><Trash2 size={13} /></button>
       </>}
     </span>
@@ -77,8 +78,8 @@ export default function Customers() {
           <span className="text-[13px] font-semibold">{sel.length} selected</span>
           <select className="field w-44" value={target} onChange={(e) => setTarget(e.target.value)}><option value="">Move to route…</option>{routes.map((r) => <option key={r.id} value={r.name}>{r.name} ({users.find((u) => u.id === r.bookerId)?.initials})</option>)}</select>
           <button className="btn" disabled={!target} onClick={() => { move(sel, target); toast(`${sel.length} customers moved to ${target}`); setSel([]); setTarget(""); }}>Move</button>
-          <button className="btn" onClick={async () => { if (await ask({ title: `Block ${sel.length} customers?`, body: "Bookers will not be able to take new orders for them until you unblock.", confirm: "Block", danger: true })) { setStatus(sel, "blocked", "Blocked by back office"); toast(`${sel.length} customers blocked`); setSel([]); } }}><Ban size={13} /> Block</button>
-          <button className="btn" onClick={() => { setStatus(sel, "active"); toast("Unblocked"); setSel([]); }}>Unblock</button>
+          <button className="btn" onClick={() => setHoldFor({ ids: sel, mode: "hold" })}><Ban size={13} /> Block</button>
+          <button className="btn" onClick={() => setHoldFor({ ids: sel, mode: "release" })}>Release</button>
           <button className="btn ml-auto" onClick={() => setSel([])}>Clear</button>
         </div>
       )}
@@ -133,6 +134,13 @@ export default function Customers() {
         )}
       </div>
 
+      {holdFor && (
+        <MasterForm<{ reason: string }> title={holdFor.mode === "hold" ? `Put ${holdFor.ids.length > 1 ? `${holdFor.ids.length} customers` : customers.find((c) => c.id === holdFor.ids[0])?.name} on credit hold` : `Release ${holdFor.ids.length > 1 ? `${holdFor.ids.length} customers` : customers.find((c) => c.id === holdFor.ids[0])?.name}`}
+          initial={{ reason: "" }} onClose={() => setHoldFor(null)}
+          fields={[{ key: "reason", label: holdFor.mode === "hold" ? "Why is the credit being held?" : "Why is it being released?", required: true, wide: true, hint: holdFor.mode === "hold" ? "For example: cheque bounced, 60 days overdue, disputes the last invoice" : "For example: paid in full, owner agreed, promise received" }]}
+          footer={() => <div className="text-xs text-ink2">{holdFor.mode === "hold" ? "Bookers cannot take new orders and approved picks are held by the warehouse until the credit is released." : "Bookers can take orders again. The reason is kept in the customer's history."}</div>}
+          onSave={(v) => { const ids = holdFor.ids; const mode = holdFor.mode; setStatus(ids, mode === "hold" ? "blocked" : "active", v.reason); setHoldFor(null); setSel([]); toast(mode === "hold" ? `${ids.length} customer${ids.length > 1 ? "s" : ""} on credit hold` : `${ids.length} customer${ids.length > 1 ? "s" : ""} released`); }} />
+      )}
       {stmt && <Statement c={customers.find((x) => x.id === stmt.id) ?? stmt} onClose={() => setStmt(null)} />}
       {edit && (
         <MasterForm<Customer> title={customers.some((c) => c.id === edit.id) ? "Edit customer" : "Add customer"} initial={edit} onClose={() => setEdit(null)}
@@ -142,6 +150,8 @@ export default function Customers() {
             { key: "type", label: "Type", type: "select", options: [["credit", "Credit"], ["cash", "Cash"]] },
             { key: "priceListId", label: "Price list", type: "select", options: lists.map((l) => [l.id, `${l.name} (${l.adjustPct > 0 ? "+" : ""}${l.adjustPct}%)`]) },
             { key: "creditLimit", label: "Credit limit (Rs.)", type: "number" }, { key: "creditDays", label: "Credit days", type: "number" },
+            { key: "maxDiscount" as const, label: "Discount limit (%)", type: "number" as const, hint: "Leave empty to use the company limit of 5%" },
+            { key: "termsNote" as const, label: "Special terms", wide: true, hint: "For example: pays by cheque on Fridays, always wants delivery before noon" },
             ...(customers.some((c) => c.id === edit.id) ? [] : [{ key: "balance" as const, label: "Opening balance (Rs.)", type: "number" as const }]),
           ]}
           validate={(v) => ({
@@ -150,9 +160,10 @@ export default function Customers() {
             creditLimit: v.creditLimit < 0 ? "Credit limit cannot be negative" : "",
             creditDays: v.creditDays < 0 || v.creditDays > 120 ? "Credit days must be 0 to 120" : "",
             balance: v.balance < 0 ? "Opening balance cannot be negative" : "",
+            maxDiscount: v.maxDiscount !== undefined && !Number.isNaN(v.maxDiscount) && (v.maxDiscount < 0 || v.maxDiscount > 20) ? "Between 0 and 20%" : "",
           })}
           footer={(v) => { const r = routes.find((x) => x.name === v.route); const b = users.find((u) => u.id === r?.bookerId); return <div className="text-xs text-ink2">Booker follows the route: <b>{b?.name ?? "—"}</b>{r && <> · visits {r.days.join(", ")}</>}</div>; }}
-          onSave={(v) => { upsert(v); setEdit(null); toast("Customer saved"); }} />
+          onSave={(v) => { upsert({ ...v, maxDiscount: v.maxDiscount === undefined || Number.isNaN(v.maxDiscount) ? undefined : v.maxDiscount, termsNote: v.termsNote || undefined }); setEdit(null); toast("Customer saved"); }} />
       )}
     </div>
   );

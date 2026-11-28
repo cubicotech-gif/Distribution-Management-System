@@ -134,12 +134,12 @@ Built department by department. Nothing moves to the next department until the c
 - ⬜ Camera barcode scanning (typed codes only)
 
 ## C. Back Office (orders, billing, accounts, masters)
-- 🟡 Order approval with credit and discount rules. ⬜ Credit hold and release with reason; partial approval; split delivery; backorder handling
-- ⬜ Quotation / order edit history and customer-wise special terms
-- ⬜ Invoice: discount lines, tax breakdown, rounding, invoice cancellation / reversal with approval
-- ⬜ Credit and debit notes as proper documents with PDFs
+- ✅ Order approval with credit and discount rules (per-customer discount limit); ✅ credit hold and release with a reason, history kept on the statement; ✅ partial approval ("approve what's available") with an automatic backorder; ✅ short picks create a backorder; ✅ Backorders tab. ⬜ Split delivery over several trips
+- ✅ Order edit history, order trail and customer-wise special terms (banner on the order)
+- ✅ Invoice: tax breakdown, rounding, amount in words, payment terms; ✅ invoice cancellation needs owner approval, then re-invoice with an -R suffix. ⬜ Per-line discount column
+- ✅ Credit and debit notes as printable documents (owner approval above Rs. 25,000); graded returns appear as credit notes. ⬜ PDF download
 - 🟡 Recovery. ⬜ Promise-to-pay dates, follow-up notes, reminder list per day, cheque register (received, deposited, cleared, bounced)
-- ⬜ Customer ledger export, day book, cash book, bank deposit slip
+- 🟡 Customer ledger CSV export done. ⬜ Day book, cash book, bank deposit slip
 - 🟡 Trip settlement. ⬜ Cash handover slip, shortage/excess handling
 - 🟡 Masters (customers, products, routes, price lists, schemes, suppliers, change log). ⬜ Booker and staff master, customer groups, GPS location
 

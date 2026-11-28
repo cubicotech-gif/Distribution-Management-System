@@ -24,6 +24,7 @@ const NAV: Nav[] = [
   // Back office
   { href: "/orders", label: "Orders", icon: ClipboardList, roles: ["admin", "sales"], badge: "orders" },
   { href: "/invoices", label: "Invoices", icon: FileText, roles: ["sales"], badge: "invoice" },
+  { href: "/notes", label: "Credit & debit notes", icon: FileText, roles: ["sales", "admin"] },
   { href: "/recovery", label: "Recovery", icon: Wallet, roles: ["sales"] },
   { href: "/settlements", label: "Trip settlement", icon: Landmark, roles: ["sales"], badge: "settle" },
   { href: "/customers", label: "Customers", icon: Users, roles: ["admin", "sales"] },

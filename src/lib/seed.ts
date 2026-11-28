@@ -1,4 +1,4 @@
-import type { Allocation, Bin, Handover, Customer, Grn, Order, Payment, PriceList, Product, PurchaseOrder, User, Line, OrderStatus, Stamp, ReturnNote, Route, Scheme, StockEntry, Supplier, Trip } from "./types";
+import type { Allocation, Bin, CreditNote, Handover, Customer, Grn, Order, Payment, PriceList, Product, PurchaseOrder, User, Line, OrderStatus, Stamp, ReturnNote, Route, Scheme, StockEntry, Supplier, Trip } from "./types";
 
 export const USERS: User[] = [
   { id: "u-admin", name: "Zarie Khan", initials: "ZK", role: "admin", title: "Owner" },
@@ -312,4 +312,8 @@ for (const o of ORDERS) {
 export const HANDOVERS: Handover[] = [
   { id: "hv1", at: Date.now() - 9 * 3600_000, by: "IA", shift: "Evening", important: true, ackBy: ["IA"], text: "Rack A-07-1 shelf is cracked and blocked. Do not use until maintenance fixes it. Dalda delivery is at the dock waiting for putaway." },
   { id: "hv2", at: Date.now() - 20 * 3600_000, by: "DK", shift: "Morning", important: false, ackBy: ["DK", "IA"], text: "Tapal truck was 6 hours late. Count is done, waiting for purchasing approval." },
+];
+
+export const NOTES: CreditNote[] = [
+  { id: "n1", folio: "CN-5101", kind: "credit", customerId: "c7", base: 4237, taxPct: 18, amount: 5000, reason: "Price difference on last invoice", status: "issued", by: "KH", at: Date.now() - 4 * 86400000 },
 ];

@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useStore, useUser } from "@/lib/store";
-import { fmt, orderTotal, overdueAmount, short } from "@/lib/calc";
+import { fmt, orderTotal, overdueAmount, short, unpaidOrders, invoiceDate } from "@/lib/calc";
 import { checkOrder } from "@/lib/check";
 import { Card, Row, Tile } from "../dash";
 import { toast } from "../ui";
@@ -24,6 +24,9 @@ export default function BackOffice() {
   const mid = new Date(); mid.setHours(0, 0, 0, 0);
   const collected = payments.filter((p) => p.at >= mid.getTime()).reduce((s, p) => s + p.amount, 0);
   const chase = customers.map((c) => ({ c, o: overdueAmount(orders, c) })).filter((x) => x.o > 0).sort((a, b) => b.o - a.o).slice(0, 5);
+  const backorders = orders.filter((o) => o.backorderOf && (o.status === "booked" || o.status === "hold")).length;
+  const setStatus = useStore((s) => s.setCustomerStatus);
+  const holdCandidates = customers.filter((c) => c.status !== "blocked" && c.type === "credit" && unpaidOrders(orders, c.id).some((o) => (Date.now() - invoiceDate(o)) / 86400000 > c.creditDays + 30)).slice(0, 4);
   const pendingCN = returns.filter((r) => r.status !== "graded").length;
   const unlisted = products.filter((p) => p.status === "unlisted");
   const arrived = unlisted.filter((p) => p.stock > 0);
@@ -31,10 +34,11 @@ export default function BackOffice() {
   return (
     <div className="mx-auto flex max-w-[1100px] flex-col gap-4">
       <div><h1 className="text-[22px] font-bold">Back office queue</h1><p className="text-ink2">Orders to approve, invoices to issue, money to chase. Clear the top row first.</p></div>
-      <div className="grid grid-cols-5 gap-3">
+      <div className="grid grid-cols-6 gap-3">
         <Tile label="To approve" value={booked.length} sub={`${exceptions.length} with credit or stock issues`} href="/orders" tone={exceptions.length ? "warn" : undefined} />
         <Tile label="Waiting for owner" value={waitingOwner.length} sub="Credit, overdue or discount exceptions" href="/orders" />
         <Tile label="Ready to invoice" value={ready.length} sub="Challans from warehouse" href="/invoices" tone={ready.length ? "ok" : undefined} />
+        <Tile label="Backorders" value={backorders} sub="Short items waiting for stock" href="/orders" tone={backorders ? "warn" : undefined} />
         <Tile label="Trips to settle" value={toSettle.length} sub="Match cash with KE" href="/settlements" />
         <Tile label="Waiting to be listed" value={unlisted.length} sub={arrived.length ? `${arrived.length} already arrived, bookers cannot sell them` : "On order, no price yet"} href="/products?tab=unlisted" tone={arrived.length ? "bad" : unlisted.length ? "warn" : undefined} />
       </div>
@@ -45,6 +49,10 @@ export default function BackOffice() {
         </Card>
         <Card title="Chase these customers" action={<Link href="/recovery" className="text-xs font-semibold text-accent">Recovery</Link>}>
           {chase.map(({ c, o }) => <Row key={c.id}><div><div className="font-medium">{c.name}</div><div className="text-[11px] text-ink3">{c.route}</div></div><span className="num chip chip-bad">{short(o)} overdue</span></Row>)}
+        </Card>
+        <Card title="Consider a credit hold">
+          {holdCandidates.length === 0 && <div className="py-3 text-ink3">Nobody is 30 days past their credit terms.</div>}
+          {holdCandidates.map((c) => <Row key={c.id}><div className="min-w-0"><div className="truncate font-medium">{c.name}</div><div className="text-[11px] text-ink3">{c.creditDays} day terms</div></div><button className="btn h-7" onClick={() => { setStatus([c.id], "blocked", "30+ days past credit terms"); toast(`${c.name} on credit hold`, { undo: () => setStatus([c.id], "active") }); }}>Hold</button></Row>)}
         </Card>
         <Card title="Today so far">
           <Row><span>Collected</span><span className="num font-semibold">Rs. {fmt(collected)}</span></Row>

@@ -1,21 +1,22 @@
 "use client";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { BINS, CUSTOMERS, GRNS, HANDOVERS, LEDGER, ORDERS, PAYMENTS, PRICE_LISTS, PRODUCTS, PURCHASES, RETURNS, ROUTES, SCHEMES, SUPPLIERS, TRIPS, USERS } from "./seed";
+import { BINS, CUSTOMERS, GRNS, HANDOVERS, LEDGER, NOTES, ORDERS, PAYMENTS, PRICE_LISTS, PRODUCTS, PURCHASES, RETURNS, ROUTES, SCHEMES, SUPPLIERS, TRIPS, USERS } from "./seed";
 import { accepted, good, receivedSoFar } from "./grn";
 import { DOCK, HOLD, binUsed } from "./locations";
 import { ADJ_CODES } from "./types";
 import { lineDelta } from "./counts";
-import { applySchemes, isExpired, orderDue, sellable, orderTotal, pcsOf, totals, unpaidOrders } from "./calc";
+import { applySchemes, available, isExpired, orderDue, sellable, orderTotal, pcsOf, totals, unpaidOrders } from "./calc";
 import type {
   Activity, Allocation, Approval, Customer, Line, Order, OrderStatus, Payment, Product, PurchaseOrder,
-  AdjCode, Handover, Bin, ChangeEntry, CountLine, CountSession, Destruction, Disposition, EntryKind, Grn, GrnLine, PriceChange, PriceList, ProductStatus, ReturnNote, ReturnReason, Role, Route, Scheme, StockAdj, StockEntry, StockMove, Supplier, SupplierReturn, Trip, User,
+  AdjCode, CreditNote, Handover, Bin, ChangeEntry, CountLine, CountSession, Destruction, Disposition, EntryKind, Grn, GrnLine, PriceChange, PriceList, ProductStatus, ReturnNote, ReturnReason, Role, Route, Scheme, StockAdj, StockEntry, StockMove, Supplier, SupplierReturn, Trip, User,
 } from "./types";
 
 const uid = () => Math.random().toString(36).slice(2, 9);
 export const MAX_DISCOUNT = 5; // % above which the owner must approve
 export const PRICE_LIMIT = 10; // % price change above which the owner must approve
-export const ADJ_LIMIT = 20000; // Rs. stock-count variance above which the owner must approve
+export const ADJ_LIMIT = 20000;
+export const NOTE_LIMIT = 25000; // Rs: credit and debit notes above this need the owner // Rs. stock-count variance above which the owner must approve
 
 const cloneP = (ps: Product[]) => ps.map((p) => ({ ...p, batches: p.batches.map((b) => ({ ...b })) }));
 
@@ -76,6 +77,7 @@ const seedState = () => ({
   destructions: [] as Destruction[],
   counts: [] as CountSession[],
   handovers: HANDOVERS.map((h) => ({ ...h, ackBy: [...h.ackBy] })) as Handover[],
+  notes: NOTES.map((n) => ({ ...n })) as CreditNote[],
   changeLog: [] as ChangeEntry[],
   activity: [] as Activity[],
   seq: 43,
@@ -106,6 +108,7 @@ interface State {
   destructions: Destruction[];
   counts: CountSession[];
   handovers: Handover[];
+  notes: CreditNote[];
   changeLog: ChangeEntry[];
   activity: Activity[];
   seq: number;
@@ -119,6 +122,9 @@ interface State {
   updateOrderLines: (id: string, lines: Line[]) => void;
   approveOrder: (id: string, by: string, ownerOverride?: boolean) => { ok: boolean; reasons?: string[] };
   holdOrder: (id: string, by: string) => void;
+  approvePartial: (id: string, by: string) => { ok: boolean; reason?: string; backorder?: string };
+  requestInvoiceCancel: (id: string, reason: string, by: string) => { ok: boolean; reason?: string };
+  issueNote: (n: { kind: "credit" | "debit"; customerId: string; orderId?: string; base: number; taxPct: number; reason: string; by: string }) => CreditNote;
   restoreOrder: (id: string, status: OrderStatus, by: string) => void;
   cancelOrder: (id: string, by: string) => void;
   pickOrder: (id: string, picked: Record<number, number>, reasons: Record<number, string>, by: string, stats?: { scan: number; manual: number }) => void;
@@ -212,6 +218,8 @@ const aud = (s: State, entity: ChangeEntry["entity"], text: string): ChangeEntry
 type NewEntry = { productId: string; kind: EntryKind; batch: string; from?: string; to?: string; qty: number; pcs: number; ref: string; note?: string; orderId?: string };
 const led = (s: State, by: string, es: NewEntry[]): StockEntry[] => [...es.map((e) => ({ ...e, id: uid(), at: Date.now(), by })), ...s.ledger].slice(0, 3000);
 const c0 = (s: State, id: string) => s.customers.find((c) => c.id === id)?.name ?? "";
+const noteEffect = (c: Customer, kind: "credit" | "debit", amount: number): Customer =>
+  c.type !== "credit" ? c : { ...c, balance: kind === "credit" ? Math.max(0, c.balance - amount) : c.balance + amount };
 const stamp = (o: Order, status: OrderStatus, by: string) => [...o.trail, { status, at: Date.now(), by }];
 
 export const useStore = create<State>()(
@@ -252,7 +260,15 @@ export const useStore = create<State>()(
             return l;
           });
           const res = applySchemes(st.schemes, prepared, c?.route).map((l, i) => (forced.has(i) && !l.isFree ? { ...l, manualDisc: undefined } : l));
-          return { orders: st.orders.map((x) => (x.id === id ? { ...x, lines: res } : x)) };
+          const who = st.users.find((u) => u.id === st.userId)?.initials ?? "—";
+          const changes: string[] = [];
+          res.forEach((l, i) => {
+            const before = old[i]; if (!before || l.isFree) return;
+            const nm = st.products.find((p) => p.id === l.productId)?.name ?? "";
+            if (before.qty !== l.qty) changes.push(`${nm}: quantity ${before.qty} → ${l.qty}`);
+            if (before.discPct !== l.discPct) changes.push(`${nm}: discount ${before.discPct}% → ${l.discPct}%`);
+          });
+          return { orders: st.orders.map((x) => (x.id === id ? { ...x, lines: res, edits: changes.length ? [...(x.edits ?? []), ...changes.map((text) => ({ at: Date.now(), by: who, text }))] : x.edits } : x)) };
         }),
 
       approveOrder: (id, by, ownerOverride = false) => {
@@ -265,7 +281,8 @@ export const useStore = create<State>()(
         if (c && c.type === "credit" && c.balance + total > c.creditLimit) reasons.push(`Over credit limit by Rs. ${Math.round(c.balance + total - c.creditLimit).toLocaleString()}`);
         if (c && c.type === "credit" && c.oldestDue > c.creditDays + 14) reasons.push(`Oldest invoice ${c.oldestDue} days unpaid`);
         const maxDisc = Math.max(0, ...o.lines.map((l) => l.discPct));
-        if (maxDisc > MAX_DISCOUNT) reasons.push(`Discount ${maxDisc}% is above the ${MAX_DISCOUNT}% limit`);
+        const lim = c?.maxDiscount ?? MAX_DISCOUNT;
+        if (maxDisc > lim) reasons.push(`Discount ${maxDisc}% is above ${c?.maxDiscount !== undefined ? "this customer's" : "the"} ${lim}% limit`);
 
         if (reasons.length && !ownerOverride) {
           const exists = s.approvals.some((a) => a.kind === "order" && a.refId === id && a.status === "pending");
@@ -282,7 +299,7 @@ export const useStore = create<State>()(
         const products = cloneP(s.products);
         for (const l of o.lines) {
           const p = products.find((x) => x.id === l.productId)!;
-          const av = p.stock - p.reserved;
+          const av = available(p);
           p.reserved += Math.min(pcsOf(l, p), Math.max(0, av));
         }
         set({
@@ -291,6 +308,67 @@ export const useStore = create<State>()(
           activity: log(s, `${o.folio} approved by ${by}. Stock reserved`),
         });
         return { ok: true };
+      },
+
+      approvePartial: (id, by) => {
+        const s = get();
+        const o = s.orders.find((x) => x.id === id);
+        if (!o || !(o.status === "booked" || (o.status === "hold" && !o.needsOwner))) return { ok: false, reason: "This order cannot be approved now" };
+        const prods = cloneP(s.products);
+        const keep: Line[] = [], back: Line[] = [];
+        for (const l of o.lines.filter((x) => !x.isFree)) {
+          const p = prods.find((x) => x.id === l.productId)!;
+          const per = l.unit === "ctn" ? p.packSize : 1;
+          const can = Math.floor(Math.min(pcsOf(l, p), available(p)) / per);
+          if (can > 0) { keep.push({ ...l, qty: can }); p.reserved += can * per; }
+          if (can < l.qty) back.push({ ...l, qty: l.qty - can, pickedQty: undefined, shortReason: undefined, scheme: undefined, isFree: undefined });
+        }
+        if (!keep.length) return { ok: false, reason: "Nothing is available right now" };
+        if (!back.length) { const r = get().approveOrder(id, by); return { ok: r.ok, reason: r.reasons?.[0] }; }
+        const c = s.customers.find((x) => x.id === o.customerId);
+        const seq = s.seq;
+        const bo: Order = {
+          id: `o${seq}`, folio: `SO-${1000 + seq}`, customerId: o.customerId, bookerId: o.bookerId, lines: applySchemes(s.schemes, back, c?.route), status: "booked", createdAt: Date.now(),
+          trail: [{ status: "booked", at: Date.now(), by: by }], paid: 0, backorderOf: o.folio, note: `Backorder of ${o.folio}: waiting for stock`,
+        };
+        set({
+          orders: [bo, ...s.orders.map((x) => (x.id === id ? { ...x, lines: applySchemes(s.schemes, keep, c?.route), edits: [...(x.edits ?? []), { at: Date.now(), by, text: `Approved only what is in stock. The rest moved to backorder ${bo.folio}` }] } : x))],
+          seq: seq + 1,
+          activity: log(s, `${o.folio} approved for the available stock only. Backorder ${bo.folio} created`),
+        });
+        const r = get().approveOrder(id, by);
+        return { ok: true, reason: r.ok ? undefined : r.reasons?.[0], backorder: bo.folio };
+      },
+
+      requestInvoiceCancel: (id, reason, by) => {
+        const s = get();
+        const o = s.orders.find((x) => x.id === id);
+        if (!o || o.status !== "invoiced") return { ok: false, reason: "Only an invoice that has not been delivered can be cancelled. For delivered goods use a credit note." };
+        const trip = s.trips.find((t) => t.id === o.tripId);
+        if (trip && trip.status !== "loading") return { ok: false, reason: "The truck has already left. Ask the delivery team to bring the goods back." };
+        if (o.cancelPending) return { ok: false, reason: "A cancellation request is already waiting for the owner" };
+        const c = s.customers.find((x) => x.id === o.customerId);
+        set({
+          orders: s.orders.map((x) => (x.id === id ? { ...x, cancelPending: true } : x)),
+          approvals: [{ id: uid(), kind: "invoice", refId: id, text: `Cancel invoice ${o.invoiceNo} · ${c?.name}`, detail: reason, amount: orderTotal(o), by, at: Date.now(), status: "pending" }, ...s.approvals],
+          activity: log(s, `${by} asked to cancel ${o.invoiceNo}: ${reason}`),
+        });
+        return { ok: true };
+      },
+
+      issueNote: (n) => {
+        const s = get();
+        const amount = Math.round(n.base * (1 + n.taxPct / 100));
+        const pend = amount > NOTE_LIMIT;
+        const note: CreditNote = { id: uid(), folio: `${n.kind === "credit" ? "CN" : "DN"}-${5100 + s.notes.length + 1}`, kind: n.kind, customerId: n.customerId, orderId: n.orderId, base: n.base, taxPct: n.taxPct, amount, reason: n.reason, status: pend ? "pending" : "issued", by: n.by, at: Date.now() };
+        const c = s.customers.find((x) => x.id === n.customerId);
+        set({
+          notes: [note, ...s.notes],
+          customers: pend ? s.customers : s.customers.map((x) => (x.id === n.customerId ? noteEffect(x, n.kind, amount) : x)),
+          approvals: pend ? [{ id: uid(), kind: "note", refId: note.id, text: `${n.kind === "credit" ? "Credit" : "Debit"} note ${note.folio} · ${c?.name}`, detail: n.reason, amount, by: n.by, at: Date.now(), status: "pending" }, ...s.approvals] : s.approvals,
+          activity: log(s, `${n.by} ${pend ? "asked for" : "issued"} ${n.kind} note ${note.folio} for ${c?.name} (Rs. ${amount.toLocaleString()})${pend ? ", waiting for the owner" : ""}`),
+        });
+        return note;
       },
 
       restoreOrder: (id, status, by) =>
@@ -335,11 +413,17 @@ export const useStore = create<State>()(
         });
         const challanNo = `DC-${2000 + Number(o.folio.slice(3)) - 1000}`;
         const custName = s.customers.find((c) => c.id === o.customerId)?.name;
+        // whatever could not be picked becomes a backorder, so the customer still gets it later
+        const shortLines: Line[] = [];
+        o.lines.forEach((l, i) => { const pq = Math.max(0, Math.min(picked[i] ?? l.qty, l.qty)); if (pq < l.qty && !l.isFree) shortLines.push({ ...l, qty: l.qty - pq, pickedQty: undefined, shortReason: undefined, scheme: undefined }); });
+        const route = s.customers.find((c) => c.id === o.customerId)?.route;
+        const bo: Order | undefined = shortLines.length ? { id: `o${s.seq}`, folio: `SO-${1000 + s.seq}`, customerId: o.customerId, bookerId: o.bookerId, lines: applySchemes(s.schemes, shortLines, route), status: "booked", createdAt: Date.now(), trail: [{ status: "booked", at: Date.now(), by }], paid: 0, backorderOf: o.folio, note: `Backorder of ${o.folio}: short at picking` } : undefined;
         set({
           products,
+          seq: bo ? s.seq + 1 : s.seq,
           ledger: led(s, by, picks.map((e) => ({ ...e, ref: challanNo, note: custName }))),
-          orders: s.orders.map((x) => (x.id === id ? { ...x, lines, allocation, challanNo, pickedBy: by, pickStats: stats, status: "picked", trail: stamp(x, "picked", by) } : x)),
-          activity: log(s, `${challanNo} created for ${o.folio}. Batches allocated by expiry`),
+          orders: [...(bo ? [bo] : []), ...s.orders.map((x) => (x.id === id ? { ...x, lines, allocation, challanNo, pickedBy: by, pickStats: stats, status: "picked" as const, trail: stamp(x, "picked", by) } : x))],
+          activity: log(s, `${challanNo} created for ${o.folio}. Batches allocated by expiry${bo ? `. Short items moved to backorder ${bo.folio}` : ""}`),
         });
       },
 
@@ -399,7 +483,8 @@ export const useStore = create<State>()(
         const s = get();
         const o = s.orders.find((x) => x.id === id);
         if (!o || o.status !== "picked" || !o.packed) return;
-        const invoiceNo = `INV-${3000 + Number(o.folio.slice(3)) - 1000}`;
+        const baseNo = `INV-${3000 + Number(o.folio.slice(3)) - 1000}`;
+        const invoiceNo = o.voided?.length ? `${baseNo}-R${o.voided.length}` : baseNo;
         const total = totals(o.lines).total;
         set({
           customers: s.customers.map((x) => (x.id === o.customerId && x.type === "credit" ? { ...x, balance: x.balance + total } : x)),
@@ -757,6 +842,22 @@ export const useStore = create<State>()(
           });
         } else if (a.kind === "destruction") {
           set({ destructions: get().destructions.map((d) => (d.id === a.refId ? { ...d, status: "approved" } : d)) });
+        } else if (a.kind === "note") {
+          const st = get();
+          const n = st.notes.find((x) => x.id === a.refId);
+          if (n) set({ notes: st.notes.map((x) => (x.id === n.id ? { ...x, status: "issued" } : x)), customers: st.customers.map((c) => (c.id === n.customerId ? noteEffect(c, n.kind, n.amount) : c)) });
+        } else if (a.kind === "invoice") {
+          const st = get();
+          const o = st.orders.find((x) => x.id === a.refId);
+          if (o) {
+            const total = totals(o.lines).total;
+            set({
+              customers: st.customers.map((c) => (c.id === o.customerId && c.type === "credit" ? { ...c, balance: Math.max(0, c.balance - total) } : c)),
+              orders: st.orders.map((x) => (x.id === o.id ? { ...x, status: "picked", invoiceNo: undefined, tripId: undefined, cancelPending: false, voided: [...(x.voided ?? []), { invoiceNo: o.invoiceNo ?? "", at: Date.now(), by: a.by, reason: a.detail }], trail: stamp(x, "picked", by) } : x)),
+              trips: st.trips.map((t) => (t.id === o.tripId ? { ...t, orderIds: t.orderIds.filter((i) => i !== o.id) } : t)).filter((t) => !(t.status === "loading" && t.orderIds.length === 0)),
+              activity: log(st, `${o.invoiceNo} cancelled with the owner's approval. ${o.folio} is back at the packing stage`),
+            });
+          }
         } else {
           const adj = s.adjustments.find((x) => x.id === a.refId);
           if (adj) {
@@ -771,6 +872,8 @@ export const useStore = create<State>()(
         const a = s.approvals.find((x) => x.id === id);
         if (!a || a.status !== "pending") return;
         if (a.kind === "order") get().cancelOrder(a.refId, by);
+        else if (a.kind === "note") set({ notes: s.notes.map((n) => (n.id === a.refId ? { ...n, status: "rejected" } : n)) });
+        else if (a.kind === "invoice") set({ orders: s.orders.map((o) => (o.id === a.refId ? { ...o, cancelPending: false } : o)) });
         else if (a.kind === "price") set({ priceHistory: s.priceHistory.map((c) => (c.batchId === a.refId && c.status === "pending" ? { ...c, status: "rejected" } : c)) });
         else if (a.kind === "destruction") {
           const d = s.destructions.find((x) => x.id === a.refId);
@@ -889,7 +992,7 @@ export const useStore = create<State>()(
       },
       setCustomerStatus: (ids, status, reason) =>
         set((s) => ({
-          customers: s.customers.map((c) => (ids.includes(c.id) ? { ...c, status, blockedReason: status === "blocked" ? reason || "Blocked by back office" : undefined } : c)),
+          customers: s.customers.map((c) => (ids.includes(c.id) ? { ...c, status, blockedReason: status === "blocked" ? reason || "Blocked by back office" : undefined, holdLog: [...(c.holdLog ?? []), { at: Date.now(), by: s.users.find((u) => u.id === s.userId)?.initials ?? "—", action: status === "blocked" ? "hold" as const : "release" as const, reason: reason || (status === "blocked" ? "Blocked by back office" : "Released") }] } : c)),
           changeLog: aud(s, "customer", `${status === "blocked" ? "Blocked" : "Unblocked"} ${ids.length} customer${ids.length > 1 ? "s" : ""}${reason ? ` (${reason})` : ""}`),
         })),
       moveCustomers: (ids, routeName) =>
@@ -1033,8 +1136,8 @@ export const useStore = create<State>()(
       setBookerTarget: (id, target) => set((s) => ({ users: s.users.map((u) => (u.id === id ? { ...u, target } : u)) })),
     }),
     {
-      name: "zarie-dms-v11",
-      version: 11,
+      name: "zarie-dms-v12",
+      version: 12,
       // The signed-in user belongs to this tab only; the business data is shared by every tab.
       partialize: (s) => Object.fromEntries(Object.entries(s).filter(([k]) => k !== "userId")) as unknown as State,
     }
@@ -1087,6 +1190,6 @@ export type { Role };
 // Keep open tabs in step: when another tab changes the data, pick it up straight away.
 if (typeof window !== "undefined") {
   window.addEventListener("storage", (e) => {
-    if (e.key === "zarie-dms-v11") useStore.persist.rehydrate();
+    if (e.key === "zarie-dms-v12") useStore.persist.rehydrate();
   });
 }

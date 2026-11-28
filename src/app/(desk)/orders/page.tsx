@@ -9,7 +9,7 @@ import { Avatar, Empty, Kbd, Spark, StatusChip, toast } from "@/components/ui";
 import OrderDetail from "@/components/OrderDetail";
 import NewOrder from "@/components/NewOrder";
 
-type Tab = "all" | "approval" | "owner" | "invoice" | "delivery" | "overdue";
+type Tab = "all" | "approval" | "owner" | "backorder" | "invoice" | "delivery" | "overdue";
 
 function Orders() {
   const params = useSearchParams();
@@ -47,6 +47,7 @@ function Orders() {
     return enriched.filter(({ o, c, chk }) => {
       if (tab === "approval" && !(o.status === "booked" || (o.status === "hold" && !o.needsOwner))) return false;
       if (tab === "owner" && !(o.status === "hold" && o.needsOwner)) return false;
+      if (tab === "backorder" && !(o.backorderOf && (o.status === "booked" || o.status === "hold"))) return false;
       if (tab === "invoice" && !(o.status === "picked" && o.packed)) return false;
       if (tab === "delivery" && o.status !== "invoiced") return false;
       if (tab === "overdue" && !(c.type === "credit" && c.oldestDue > c.creditDays)) return false;
@@ -101,6 +102,7 @@ function Orders() {
     { k: "all", l: "All" },
     { k: "approval", l: "Needs approval", n: enriched.filter((e) => e.o.status === "booked" || (e.o.status === "hold" && !e.o.needsOwner)).length },
     { k: "owner", l: "Waiting for owner", n: enriched.filter((e) => e.o.status === "hold" && e.o.needsOwner).length },
+    { k: "backorder", l: "Backorders", n: enriched.filter((e) => e.o.backorderOf && (e.o.status === "booked" || e.o.status === "hold")).length },
     { k: "invoice", l: "Ready to invoice", n: counts.ready },
     { k: "delivery", l: "Out for delivery" },
     { k: "overdue", l: "Overdue customers" },
@@ -143,7 +145,7 @@ function Orders() {
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-[13px] font-semibold">{c.name}</div>
                     <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-ink3">
-                      <span className="num">{o.folio}</span><span>·</span><span>{ago(o.createdAt)}</span>
+                      <span className="num">{o.folio}</span><span>·</span><span>{ago(o.createdAt)}</span>{o.backorderOf && <span className="font-semibold text-[var(--info-fg)]">· backorder</span>}
                       {(chk.over || chk.short.length > 0) && o.status === "booked" && <span className="font-semibold text-[var(--warn-fg)]">· needs attention</span>}
                     </div>
                   </div>

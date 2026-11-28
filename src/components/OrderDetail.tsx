@@ -3,6 +3,7 @@ import { Check, Printer } from "lucide-react";
 import { useState } from "react";
 import { useStore, useUser } from "@/lib/store";
 import { ago, available, clock, fmt, lineNet, money, orderTotal, pcsOf, STEPS, STEP_LABEL, totals } from "@/lib/calc";
+import { rupeesInWords } from "@/lib/words";
 import { checkOrder } from "@/lib/check";
 import type { Order, ReturnReason } from "@/lib/types";
 import MasterForm from "./MasterForm";
@@ -76,12 +77,17 @@ export function InvoiceDoc({ o, onClose }: { o: Order; onClose: () => void }) {
             })}
           </tbody>
         </table>
-        <div className="mt-3 ml-auto w-56 space-y-1 text-xs">
+        <div className="mt-3 ml-auto w-64 space-y-1 text-xs">
           <div className="flex justify-between"><span>Subtotal</span><span className="num">{fmt(t.gross)}</span></div>
           <div className="flex justify-between"><span>Discount</span><span className="num">-{fmt(t.discount)}</span></div>
+          <div className="flex justify-between"><span>Taxable value</span><span className="num">{fmt(t.taxable)}</span></div>
           <div className="flex justify-between"><span>Sales tax 18%</span><span className="num">{fmt(t.tax)}</span></div>
-          <div className="flex justify-between border-t border-[#d3d9d0] pt-1 text-sm font-bold"><span>Net total</span><span className="num">Rs. {fmt(t.total)}</span></div>
+          <div className="flex justify-between text-[#4b5a52]"><span>Rounding</span><span className="num">{Math.round(t.total) - t.total >= 0 ? "+" : "-"}{Math.abs(Math.round(t.total) - t.total).toFixed(2)}</span></div>
+          <div className="flex justify-between border-t border-[#d3d9d0] pt-1 text-sm font-bold"><span>Net total</span><span className="num">Rs. {fmt(Math.round(t.total))}</span></div>
         </div>
+        <div className="mt-2 text-[11px] italic text-[#4b5a52]">{rupeesInWords(t.total)}</div>
+        {o.voided && o.voided.length > 0 && <div className="mt-2 rounded border border-[#d3d9d0] px-2 py-1 text-[10.5px] text-[#4b5a52]">This invoice replaces the cancelled {o.voided.map((v) => v.invoiceNo).join(", ")}.</div>}
+        <div className="mt-4 border-t border-[#e4e8e2] pt-2 text-[10px] leading-relaxed text-[#8a968f]">Payment terms: {c.type === "credit" ? `credit ${c.creditDays} days from the invoice date` : "cash on delivery"}. Goods are returnable only if damaged or wrong, and must be reported within 24 hours of delivery.{c.termsNote ? ` Special terms: ${c.termsNote}.` : ""}</div>
         <div className="mt-8 flex justify-between text-[11px] text-[#8a968f]">
           <span>Customer signature / stamp ____________</span>
           <span>{o.status === "delivered" || o.status === "paid" ? "RECEIVED ✓" : ""}</span>
@@ -147,6 +153,10 @@ export default function OrderDetail({ o, primary }: { o: Order; primary?: { labe
   const [inv, setInv] = useState(false);
   const [ret, setRet] = useState(false);
   const [holdOpen, setHoldOpen] = useState(false);
+  const [hist, setHist] = useState(false);
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const approvePartial = useStore((s) => s.approvePartial);
+  const requestCancel = useStore((s) => s.requestInvoiceCancel);
   const holdPick = useStore((s) => s.holdPick);
   const releasePick = useStore((s) => s.releasePick);
   const c = customers.find((x) => x.id === o.customerId)!;
@@ -177,6 +187,7 @@ export default function OrderDetail({ o, primary }: { o: Order; primary?: { labe
             </div>
           </div>
           <div className="flex gap-2">
+            <button className="btn" onClick={() => setHist(true)}>History</button>
             {o.invoiceNo || o.challanNo ? <button className="btn" onClick={() => setInv(true)}><Printer size={14} /> Invoice</button> : null}
             {!readOnly && (o.status === "delivered" || o.status === "paid") && <button className="btn" onClick={() => setRet(true)}>Customer return</button>}
           </div>
@@ -194,6 +205,9 @@ export default function OrderDetail({ o, primary }: { o: Order; primary?: { labe
           </div>
         </div>
         {o.pickHold && o.status === "approved" && <div className="mt-3 rounded-xl border border-[var(--bad-fg)] bg-[var(--bad-bg)] px-3 py-2 text-[12px] text-[var(--bad-fg)]"><b>Pick on hold.</b> The warehouse cannot pick this order. {o.pickHold}</div>}
+        {o.backorderOf && <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-line bg-panel2 px-3 py-2 text-[12px] text-ink2"><span className="chip chip-info">Backorder of {o.backorderOf}</span>{o.status === "booked" && (chk.short.length === 0 ? <span className="chip chip-ok">Stock is available now. You can approve it.</span> : <span className="chip chip-warn">Waiting for stock</span>)}</div>}
+        {c.termsNote && <div className="mt-3 rounded-xl border border-line bg-panel2 px-3 py-2 text-[12px] text-ink2"><b>Special terms for this customer:</b> {c.termsNote}{c.maxDiscount !== undefined && <> · discount limit {c.maxDiscount}%</>}</div>}
+        {o.cancelPending && <div className="mt-3 rounded-xl border border-[var(--warn-fg)] bg-[var(--warn-bg)] px-3 py-2 text-[12px] text-[var(--warn-fg)]"><b>Invoice cancellation is waiting for the owner.</b></div>}
         {o.needsOwner && (
           <div className="mt-3 rounded-xl border border-[var(--warn-fg)] bg-[var(--warn-bg)] px-3 py-2 text-[12px] text-[var(--warn-fg)]">
             <span className="font-semibold">Waiting for owner.</span> {o.needsOwner.join(" · ")}
@@ -260,7 +274,9 @@ export default function OrderDetail({ o, primary }: { o: Order; primary?: { labe
           {primary && (
             <button className="btn btn-primary h-9 px-4 text-[13px]" disabled={busy} onClick={() => run(primary.run)}>{busy ? <Spinner /> : null}{primary.label} <Kbd>↵</Kbd></button>
           )}
+          {editable && (o.status === "booked" || o.status === "hold") && chk.short.length > 0 && <button className="btn h-9" onClick={() => { const r = approvePartial(o.id, by); toast(r.ok ? (r.backorder ? `Approved what is in stock. The rest is backorder ${r.backorder}` : "Approved") : r.reason ?? "Could not approve"); }}>Approve what&apos;s available</button>}
           {editable && o.status === "booked" && <button className="btn h-9" onClick={() => { hold(o.id, by); toast("Order put on hold", { undo: () => useStore.getState().restoreOrder(o.id, "booked", by) }); }}>Hold <Kbd>H</Kbd></button>}
+          {!readOnly && o.status === "invoiced" && !o.cancelPending && <button className="btn btn-danger h-9" onClick={() => setCancelOpen(true)}>Cancel invoice</button>}
           {!readOnly && o.status === "approved" && (o.pickHold ? <button className="btn h-9" onClick={() => { releasePick(o.id, by); toast("Pick released. The warehouse can pick it now"); }}>Release pick</button> : <button className="btn h-9" onClick={() => setHoldOpen(true)}>Hold pick</button>)}
           {!readOnly && (o.status === "booked" || o.status === "hold" || o.status === "approved") && (
             <button className="btn btn-danger h-9" onClick={async () => { if (await ask({ title: `Cancel ${o.folio}?`, body: o.status === "approved" ? "The reserved stock is released and the warehouse is told to stop." : "The booker will see the order as cancelled.", confirm: "Cancel order", danger: true })) { cancel(o.id, by); toast("Order cancelled"); } }}>Cancel</button>
@@ -272,8 +288,31 @@ export default function OrderDetail({ o, primary }: { o: Order; primary?: { labe
         </div>
       </div>
       {holdOpen && <MasterForm<{ reason: string }> title={`Hold the pick for ${o.folio}`} initial={{ reason: "" }} onClose={() => setHoldOpen(false)} fields={[{ key: "reason", label: "Why should the warehouse wait?", required: true, wide: true, hint: "For example: payment promised today, customer asked to delay" }]} footer={() => <div className="text-xs text-ink2">The order stays in the pick queue marked On hold. The warehouse cannot pick it until you release it.</div>} onSave={(v) => { holdPick(o.id, v.reason, by); setHoldOpen(false); toast("Pick put on hold"); }} />}
+      {hist && <OrderHistory o={o} onClose={() => setHist(false)} />}
+      {cancelOpen && <MasterForm<{ reason: string }> title={`Cancel invoice ${o.invoiceNo}`} initial={{ reason: "" }} onClose={() => setCancelOpen(false)} fields={[{ key: "reason", label: "Why is the invoice being cancelled?", required: true, wide: true, hint: "For example: wrong price, wrong customer, goods changed" }]} footer={() => <div className="text-xs text-ink2">The owner has to approve. When approved the customer balance is reduced, the invoice number is void, and the order goes back to the packing stage so a corrected invoice can be issued.</div>} onSave={(v) => { const r = requestCancel(o.id, v.reason, by); setCancelOpen(false); toast(r.ok ? "Sent to the owner for approval" : r.reason ?? "Not possible"); }} />}
       {inv && <InvoiceDoc o={o} onClose={() => setInv(false)} />}
       {ret && <ReturnModal o={o} onClose={() => setRet(false)} />}
     </div>
+  );
+}
+
+function OrderHistory({ o, onClose }: { o: Order; onClose: () => void }) {
+  const rows = [
+    ...o.trail.map((t) => ({ at: t.at, by: t.by, text: `Status: ${STEP_LABEL[t.status] ?? t.status}`, kind: "status" })),
+    ...(o.edits ?? []).map((e) => ({ ...e, kind: "edit" })),
+    ...(o.voided ?? []).map((v) => ({ at: v.at, by: v.by, text: `Invoice ${v.invoiceNo} cancelled: ${v.reason}`, kind: "void" })),
+  ].sort((a, b) => a.at - b.at);
+  return (
+    <Modal open onClose={onClose} title={`History · ${o.folio}`} width={560}>
+      <div className="max-h-[60vh] space-y-0 overflow-auto">
+        {rows.map((r, i) => (
+          <div key={i} className="flex items-start gap-3 border-b border-line py-2 last:border-0">
+            <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${r.kind === "edit" ? "bg-[var(--warn-fg)]" : r.kind === "void" ? "bg-[var(--bad-fg)]" : "bg-accent"}`} />
+            <div className="min-w-0 flex-1"><div className="text-[13px]">{r.text}</div><div className="text-[11px] text-ink3">{r.by} · {new Date(r.at).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}</div></div>
+          </div>
+        ))}
+        {o.note && <div className="mt-2 rounded-xl bg-panel2 px-3 py-2 text-xs text-ink2">Note: {o.note}</div>}
+      </div>
+    </Modal>
   );
 }

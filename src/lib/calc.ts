@@ -1,4 +1,4 @@
-import type { Customer, Line, Order, Payment, PriceList, Product, ReturnNote, Scheme, Unit } from "./types";
+import type { CreditNote, Customer, Line, Order, Payment, PriceList, Product, ReturnNote, Scheme, Unit } from "./types";
 
 export const fmt = (n: number) => Math.round(n).toLocaleString("en-PK");
 export const money = (n: number) => `Rs. ${fmt(n)}`;
@@ -162,7 +162,7 @@ export const overdueAmount = (orders: Order[], c: Customer) => {
 };
 
 export interface LedgerRow { at: number; ref: string; text: string; debit: number; credit: number; bal: number }
-export function ledger(c: Customer, orders: Order[], payments: Payment[], returns: ReturnNote[]): LedgerRow[] {
+export function ledger(c: Customer, orders: Order[], payments: Payment[], returns: ReturnNote[], notes: CreditNote[] = []): LedgerRow[] {
   const rows: Omit<LedgerRow, "bal">[] = [];
   for (const o of orders) {
     if (o.customerId !== c.id || !invoiced(o) || c.type === "cash") continue;
@@ -170,6 +170,7 @@ export function ledger(c: Customer, orders: Order[], payments: Payment[], return
   }
   for (const p of payments) if (p.customerId === c.id && c.type === "credit") rows.push({ at: p.at, ref: "RCPT", text: `Payment (${p.mode})`, debit: 0, credit: p.amount });
   for (const r of returns) if (r.customerId === c.id && r.status === "graded" && r.credit && c.type === "credit") rows.push({ at: r.gradedAt ?? r.at, ref: r.folio, text: "Credit note (return)", debit: 0, credit: r.value ?? 0 });
+  for (const n of notes) if (n.customerId === c.id && n.status === "issued" && c.type === "credit") rows.push({ at: n.at, ref: n.folio, text: n.kind === "credit" ? `Credit note · ${n.reason}` : `Debit note · ${n.reason}`, debit: n.kind === "debit" ? n.amount : 0, credit: n.kind === "credit" ? n.amount : 0 });
   rows.sort((a, b) => a.at - b.at);
   const net = rows.reduce((s, r) => s + r.debit - r.credit, 0);
   let bal = c.balance - net;
