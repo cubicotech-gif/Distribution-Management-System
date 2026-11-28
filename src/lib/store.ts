@@ -1,7 +1,7 @@
 "use client";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { BINS, CUSTOMERS, GRNS, LEDGER, ORDERS, PAYMENTS, PRICE_LISTS, PRODUCTS, PURCHASES, RETURNS, ROUTES, SCHEMES, SUPPLIERS, TRIPS, USERS } from "./seed";
+import { BINS, CUSTOMERS, GRNS, HANDOVERS, LEDGER, ORDERS, PAYMENTS, PRICE_LISTS, PRODUCTS, PURCHASES, RETURNS, ROUTES, SCHEMES, SUPPLIERS, TRIPS, USERS } from "./seed";
 import { accepted, good, receivedSoFar } from "./grn";
 import { DOCK, HOLD, binUsed } from "./locations";
 import { ADJ_CODES } from "./types";
@@ -9,7 +9,7 @@ import { lineDelta } from "./counts";
 import { applySchemes, isExpired, orderDue, sellable, orderTotal, pcsOf, totals, unpaidOrders } from "./calc";
 import type {
   Activity, Allocation, Approval, Customer, Line, Order, OrderStatus, Payment, Product, PurchaseOrder,
-  AdjCode, Bin, ChangeEntry, CountLine, CountSession, Destruction, Disposition, EntryKind, Grn, GrnLine, PriceChange, PriceList, ProductStatus, ReturnNote, ReturnReason, Role, Route, Scheme, StockAdj, StockEntry, StockMove, Supplier, SupplierReturn, Trip, User,
+  AdjCode, Handover, Bin, ChangeEntry, CountLine, CountSession, Destruction, Disposition, EntryKind, Grn, GrnLine, PriceChange, PriceList, ProductStatus, ReturnNote, ReturnReason, Role, Route, Scheme, StockAdj, StockEntry, StockMove, Supplier, SupplierReturn, Trip, User,
 } from "./types";
 
 const uid = () => Math.random().toString(36).slice(2, 9);
@@ -75,6 +75,7 @@ const seedState = () => ({
   ledger: LEDGER.map((e) => ({ ...e })) as StockEntry[],
   destructions: [] as Destruction[],
   counts: [] as CountSession[],
+  handovers: HANDOVERS.map((h) => ({ ...h, ackBy: [...h.ackBy] })) as Handover[],
   changeLog: [] as ChangeEntry[],
   activity: [] as Activity[],
   seq: 43,
@@ -104,6 +105,7 @@ interface State {
   ledger: StockEntry[];
   destructions: Destruction[];
   counts: CountSession[];
+  handovers: Handover[];
   changeLog: ChangeEntry[];
   activity: Activity[];
   seq: number;
@@ -119,7 +121,9 @@ interface State {
   holdOrder: (id: string, by: string) => void;
   restoreOrder: (id: string, status: OrderStatus, by: string) => void;
   cancelOrder: (id: string, by: string) => void;
-  pickOrder: (id: string, picked: Record<number, number>, reasons: Record<number, string>, by: string) => void;
+  pickOrder: (id: string, picked: Record<number, number>, reasons: Record<number, string>, by: string, stats?: { scan: number; manual: number }) => void;
+  addHandover: (text: string, important: boolean, by: string) => void;
+  ackHandover: (id: string, by: string) => void;
   packOrder: (id: string, cartons: number, note: string, by: string) => void;
   holdPick: (id: string, reason: string, by: string) => void;
   releasePick: (id: string, by: string) => void;
@@ -313,7 +317,7 @@ export const useStore = create<State>()(
         });
       },
 
-      pickOrder: (id, picked, reasons, by) => {
+      pickOrder: (id, picked, reasons, by, stats) => {
         const s = get();
         const o = s.orders.find((x) => x.id === id);
         if (!o) return;
@@ -334,10 +338,18 @@ export const useStore = create<State>()(
         set({
           products,
           ledger: led(s, by, picks.map((e) => ({ ...e, ref: challanNo, note: custName }))),
-          orders: s.orders.map((x) => (x.id === id ? { ...x, lines, allocation, challanNo, pickedBy: by, status: "picked", trail: stamp(x, "picked", by) } : x)),
+          orders: s.orders.map((x) => (x.id === id ? { ...x, lines, allocation, challanNo, pickedBy: by, pickStats: stats, status: "picked", trail: stamp(x, "picked", by) } : x)),
           activity: log(s, `${challanNo} created for ${o.folio}. Batches allocated by expiry`),
         });
       },
+
+      addHandover: (text, important, by) =>
+        set((s) => {
+          const h = new Date().getHours();
+          const shift: Handover["shift"] = h < 14 ? "Morning" : h < 22 ? "Evening" : "Night";
+          return { handovers: [{ id: uid(), at: Date.now(), by, shift, text, important, ackBy: [by] }, ...s.handovers].slice(0, 100), activity: log(s, `${by} left a shift handover note${important ? " (important)" : ""}`) };
+        }),
+      ackHandover: (id, by) => set((s) => ({ handovers: s.handovers.map((h) => (h.id === id && !h.ackBy.includes(by) ? { ...h, ackBy: [...h.ackBy, by] } : h)) })),
 
       packOrder: (id, cartons, note, by) => {
         const s = get();
@@ -1021,8 +1033,8 @@ export const useStore = create<State>()(
       setBookerTarget: (id, target) => set((s) => ({ users: s.users.map((u) => (u.id === id ? { ...u, target } : u)) })),
     }),
     {
-      name: "zarie-dms-v10",
-      version: 10,
+      name: "zarie-dms-v11",
+      version: 11,
       // The signed-in user belongs to this tab only; the business data is shared by every tab.
       partialize: (s) => Object.fromEntries(Object.entries(s).filter(([k]) => k !== "userId")) as unknown as State,
     }
@@ -1075,6 +1087,6 @@ export type { Role };
 // Keep open tabs in step: when another tab changes the data, pick it up straight away.
 if (typeof window !== "undefined") {
   window.addEventListener("storage", (e) => {
-    if (e.key === "zarie-dms-v10") useStore.persist.rehydrate();
+    if (e.key === "zarie-dms-v11") useStore.persist.rehydrate();
   });
 }

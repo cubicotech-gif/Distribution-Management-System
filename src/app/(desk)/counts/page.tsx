@@ -1,5 +1,6 @@
 "use client";
 import { Suspense, useMemo, useState } from "react";
+import { can } from "@/lib/perm";
 import { useSearchParams } from "next/navigation";
 import { Printer } from "lucide-react";
 import { useStore, useUser } from "@/lib/store";
@@ -22,7 +23,7 @@ function CountsInner() {
   const start = useStore((s) => s.startCount);
   const user = useUser();
   const by = user?.initials ?? "—";
-  const canAct = user?.role === "warehouse";
+  const canAct = can(user, "count");
   const showMoney = user?.role === "admin";
   const [tab, setTab] = useState<Tab>((params.get("tab") as Tab) || "schedule");
   const [sel, setSel] = useState<string[]>([]);

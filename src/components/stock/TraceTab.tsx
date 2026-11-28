@@ -1,5 +1,6 @@
 "use client";
 import { useMemo, useState } from "react";
+import { can } from "@/lib/perm";
 import { Printer, Siren } from "lucide-react";
 import { useStore, useUser } from "@/lib/store";
 import { fmt } from "@/lib/calc";
@@ -13,7 +14,7 @@ export default function TraceTab({ start }: { start?: { productId: string; batch
   const customers = useStore((s) => s.customers);
   const recall = useStore((s) => s.quarantineBatch);
   const user = useUser();
-  const canAct = user?.role === "warehouse" || user?.role === "purchasing";
+  const canAct = can(user, "stock") || user?.role === "purchasing";
   const all = useMemo(() => {
     const m = new Map<string, { productId: string; batch: string }>();
     for (const e of ledger) if (e.kind === "receipt" || e.kind === "pick") m.set(`${e.productId}|${e.batch}`, { productId: e.productId, batch: e.batch });

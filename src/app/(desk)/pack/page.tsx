@@ -1,5 +1,6 @@
 "use client";
 import { useMemo, useState } from "react";
+import { can } from "@/lib/perm";
 import { Printer, ScanLine, Tag } from "lucide-react";
 import { useStore, useUser } from "@/lib/store";
 import { ago, fmt, pcsOf } from "@/lib/calc";
@@ -15,7 +16,7 @@ export default function Pack() {
   const pack = useStore((s) => s.packOrder);
   const user = useUser();
   const by = user?.initials ?? "—";
-  const canAct = user?.role === "warehouse";
+  const canAct = can(user, "pack");
   const [busy, run] = useBusy();
   const queue = useMemo(() => orders.filter((o) => o.status === "picked" && !o.packed).sort((a, b) => (a.wave ?? "~").localeCompare(b.wave ?? "~") || a.createdAt - b.createdAt), [orders]);
   const packed = orders.filter((o) => o.status === "picked" && o.packed);

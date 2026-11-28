@@ -120,3 +120,15 @@ body {
   .printable { position: absolute; left: 0; top: 0; width: 100%; box-shadow: none !important; border: none !important; }
   .no-print { display: none !important; }
 }
+
+/* Touch mode: bigger targets for tablets and gloves. Unlayered, so it wins over the utility sizes. */
+:root[data-density="touch"] body { font-size: 14.5px; }
+:root[data-density="touch"] .btn { min-height: 44px; min-width: 44px; font-size: 14px; }
+:root[data-density="touch"] .field { min-height: 44px; font-size: 15px; }
+:root[data-density="touch"] .cell { min-height: 42px; font-size: 15px; }
+:root[data-density="touch"] .chip { padding: 4px 10px; font-size: 12.5px; }
+:root[data-density="touch"] .kbd { display: none; }
+:root[data-density="touch"] aside nav a { min-height: 46px; font-size: 14px; }
+:root[data-density="touch"] tbody tr { height: 54px; }
+:root[data-density="touch"] input[type="checkbox"] { width: 22px; height: 22px; }
+:root[data-density="touch"] select.field { min-height: 44px; }

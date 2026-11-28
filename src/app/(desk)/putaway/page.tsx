@@ -1,5 +1,6 @@
 "use client";
 import { useMemo, useState } from "react";
+import { can } from "@/lib/perm";
 import { Printer, ScanLine } from "lucide-react";
 import { useStore, useUser } from "@/lib/store";
 import { fmt, monthsLeft } from "@/lib/calc";
@@ -13,7 +14,7 @@ export default function Putaway() {
   const move = useStore((s) => s.moveStock);
   const user = useUser();
   const by = user?.initials ?? "—";
-  const canAct = user?.role === "warehouse";
+  const canAct = can(user, "putaway");
   const [busy, run] = useBusy();
   const tasks = useMemo(() => products.flatMap((p) => p.batches.filter((b) => b.bin === DOCK && b.qty > 0).map((b) => ({ p, b }))).sort((a, b) => a.b.expiry.localeCompare(b.b.expiry)), [products]);
   const [selKey, setSelKey] = useState<string | null>(null);

@@ -5,6 +5,10 @@ import { available, monthsLeft, pcsOf } from "@/lib/calc";
 import { DOCK, binUsed, replenishments } from "@/lib/locations";
 import { abcClasses, dueInfo } from "@/lib/counts";
 import { Card, Row, Tile } from "../dash";
+import { useState } from "react";
+import { useUser } from "@/lib/store";
+import { ago } from "@/lib/calc";
+import { toast } from "../ui";
 
 export default function Warehouse() {
   const orders = useStore((s) => s.orders);
@@ -51,6 +55,7 @@ export default function Warehouse() {
         <Tile label="Returns to inspect" value={rets.length} sub="Decide good or damaged" href="/returns" tone={rets.length ? "warn" : undefined} />
         <Tile label="Damaged / on hold" value={`${Math.round(damaged.reduce((s, p) => s + p.damaged / p.packSize, 0) * 10) / 10} / ${Math.round(held * 10) / 10}`} sub="Cartons: damaged · quality hold" href="/receiving" />
       </div>
+      <HandoverCard summary={`Open now: ${toPick.length} order${toPick.length === 1 ? "" : "s"} to pick, ${toPack.length} to pack, ${inbound.length} truck${inbound.length === 1 ? "" : "s"} due, ${countsDue} count${countsDue === 1 ? "" : "s"} due.`} />
       <div className="grid grid-cols-3 gap-3">
         <Card title="Sell these first (expiring)" action={<Link href="/stock?tab=expiry" className="text-xs font-semibold text-accent">Expiry actions</Link>}>
           {near.length === 0 && <div className="py-3 text-ink3">No near-expiry stock.</div>}
@@ -66,5 +71,40 @@ export default function Warehouse() {
         </Card>
       </div>
     </div>
+  );
+}
+
+function HandoverCard({ summary }: { summary: string }) {
+  const hs = useStore((s) => s.handovers);
+  const add = useStore((s) => s.addHandover);
+  const ack = useStore((s) => s.ackHandover);
+  const user = useUser();
+  const me = user?.initials ?? "—";
+  const isWh = user?.role === "warehouse";
+  const [text, setText] = useState("");
+  const [imp, setImp] = useState(false);
+  const unread = hs.filter((h) => !h.ackBy.includes(me)).length;
+  return (
+    <Card title="Shift handover" action={isWh && unread > 0 ? <span className="chip chip-warn">{unread} unread</span> : undefined}>
+      {isWh && (
+        <div className="mb-3 rounded-xl border border-line bg-panel2 p-3">
+          <textarea className="field h-[64px] resize-none py-2" placeholder="Leave a note for the next shift: blocked racks, late trucks, things to watch…" value={text} onChange={(e) => setText(e.target.value)} />
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <button className="btn" onClick={() => setText((t) => (t ? t + "\n" : "") + summary)}>Add today&apos;s numbers</button>
+            <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" className="h-4 w-4 accent-[var(--accent)]" checked={imp} onChange={(e) => setImp(e.target.checked)} /> Mark as important</label>
+            <button className="btn btn-primary ml-auto" disabled={text.trim().length < 5} onClick={() => { add(text.trim(), imp, me); setText(""); setImp(false); toast("Note left for the next shift"); }}>Leave note</button>
+          </div>
+        </div>
+      )}
+      {hs.length === 0 && <div className="py-3 text-ink3">No notes yet.</div>}
+      {hs.slice(0, 5).map((h) => (
+        <div key={h.id} className={`slidein border-t border-line py-2.5 first:border-0 ${h.important ? "" : ""}`}>
+          <div className="flex items-center gap-2 text-xs"><span className="font-semibold">{h.by}</span><span className="text-ink3">{h.shift} shift · {ago(h.at)}</span>{h.important && <span className="chip chip-bad">Important</span>}{isWh && !h.ackBy.includes(me) && <span className="h-2 w-2 rounded-full bg-accent" title="You have not read this" />}
+            <span className="ml-auto text-[11px] text-ink3">Read by {h.ackBy.join(", ")}</span></div>
+          <div className="mt-1 whitespace-pre-line text-[13px] text-ink2">{h.text}</div>
+          {isWh && !h.ackBy.includes(me) && <button className="btn mt-1.5 h-7" onClick={() => ack(h.id, me)}>Mark as read</button>}
+        </div>
+      ))}
+    </Card>
   );
 }

@@ -123,15 +123,15 @@ Built department by department. Nothing moves to the next department until the c
 - ⬜ Second counter must be a different person (the system does not track who recounted)
 
 ### B8. Warehouse reports
-- ⬜ Stock summary, movement, expiry, ageing, GRN register, dispatch register, pick accuracy, count variances, returns, damaged stock value (no prices shown to warehouse staff; quantities only)
+- ✅ Eight reports with 7 / 30 / 90 day filters and CSV export: stock summary, movements, goods received (GRN register), dispatch register, pick accuracy by person, count accuracy, returns, damaged and held stock
+- ✅ Warehouse staff see quantities only. Cost values appear for Purchasing and the Owner
 
 ### B9. Warehouse tools
-- ⬜ Warehouse-only global search (product, batch, bin, order)
-- ⬜ Tablet mode, scanner-friendly large inputs
-- ⬜ Shift handover notes
-- ⬜ Warehouse roles: storekeeper, picker, loader (different permissions)
-
----
+- ✅ Warehouse-scoped search (Ctrl+K): products, batches, bins, GRNs, challans and orders. Customers and prices are not shown to warehouse staff
+- ✅ Touch mode: bigger buttons and inputs for tablets, switched on automatically on touch screens, remembered per device
+- ✅ Shift handover notes with "important" flag, one-click "add today's numbers", and read receipts per person
+- ✅ Warehouse roles: Storekeeper (everything), Picker (pick and pack), Loader (dispatch). Other screens are view-only with a banner saying so; each role lands on its own home screen
+- ⬜ Camera barcode scanning (typed codes only)
 
 ## C. Back Office (orders, billing, accounts, masters)
 - 🟡 Order approval with credit and discount rules. ⬜ Credit hold and release with reason; partial approval; split delivery; backorder handling

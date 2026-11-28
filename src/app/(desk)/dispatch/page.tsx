@@ -1,5 +1,6 @@
 "use client";
 import { useMemo, useState } from "react";
+import { can } from "@/lib/perm";
 import { ArrowDown, ArrowUp, Printer, ShieldCheck, Truck, X } from "lucide-react";
 import { useStore, useUser } from "@/lib/store";
 import { ago, pcsOf } from "@/lib/calc";
@@ -18,7 +19,7 @@ export default function Dispatch() {
   const dispatchTrip = useStore((s) => s.dispatchTrip);
   const user = useUser();
   const by = user?.initials ?? "—";
-  const canAct = user?.role === "warehouse";
+  const canAct = can(user, "dispatch");
   const [busy, run] = useBusy();
   const ready = orders.filter((o) => o.status === "invoiced" && !o.tripId);
   const [pick, setPick] = useState<string[]>([]); // order = drop sequence

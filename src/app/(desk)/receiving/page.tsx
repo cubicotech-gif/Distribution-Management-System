@@ -1,5 +1,6 @@
 "use client";
 import { useMemo, useRef, useState } from "react";
+import { can } from "@/lib/perm";
 import { Camera, Plus, Printer, ScanLine, Tag } from "lucide-react";
 import { useStore, useUser } from "@/lib/store";
 import { ago, fmt, short as shortMoney } from "@/lib/calc";
@@ -26,7 +27,8 @@ export default function Receiving() {
   const user = useUser();
   const role = user?.role;
   const by = user?.initials ?? "—";
-  const isWh = role === "warehouse";
+  const inWh = role === "warehouse";
+  const isWh = can(user, "inbound");
   const isPur = role === "purchasing";
   const purchases = useStore((s) => s.purchases);
   const grns = useStore((s) => s.grns);
@@ -35,7 +37,7 @@ export default function Receiving() {
   const closeShort = useStore((s) => s.closePoShort);
   const release = useStore((s) => s.releaseQuarantine);
 
-  const tabs: [Tab, string][] = [["expected", "Expected"], ["counting", "Counting"], ["done", "Done"], ...(isPur ? [] : [["hold", "On hold"] as [Tab, string]]), ...(isWh ? [] : [["claims", "Claims"] as [Tab, string]])];
+  const tabs: [Tab, string][] = [["expected", "Expected"], ["counting", "Counting"], ["done", "Done"], ...(isPur ? [] : [["hold", "On hold"] as [Tab, string]]), ...(inWh ? [] : [["claims", "Claims"] as [Tab, string]])];
   const [tab, setTab] = useState<Tab>("expected");
   const [sel, setSel] = useState<Sel>(null);
   const [newPO, setNewPO] = useState(false);

@@ -1,5 +1,6 @@
 "use client";
 import { useMemo, useState } from "react";
+import { can } from "@/lib/perm";
 import { useStore, useUser } from "@/lib/store";
 import { fmt } from "@/lib/calc";
 import { TIER, batchGroups, type Tier } from "@/lib/stockctl";
@@ -12,7 +13,7 @@ export default function ExpiryTab({ onTrace }: { onTrace: (productId: string, ba
   const user = useUser();
   const role = user?.role;
   const by = user?.initials ?? "—";
-  const canAct = role === "warehouse" || role === "purchasing";
+  const canAct = can(user, "stock") || role === "purchasing";
   const showCost = role === "purchasing" || role === "admin";
   const [tier, setTier] = useState<"risk" | Tier | "all">("risk");
   const groups = useMemo(() => batchGroups(products).sort((a, b) => a.days - b.days), [products]);

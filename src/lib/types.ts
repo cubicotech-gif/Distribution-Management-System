@@ -1,3 +1,4 @@
+export type WhRole = "storekeeper" | "picker" | "loader";
 export type Role = "admin" | "sales" | "warehouse" | "purchasing" | "booker" | "delivery" | "recovery";
 
 export interface User {
@@ -6,6 +7,7 @@ export interface User {
   initials: string;
   role: Role;
   title: string;
+  whRole?: WhRole; // which kind of warehouse worker (warehouse users only)
   target?: number; // monthly sales target (bookers)
   baseline?: number; // sales already achieved this month before the demo started
 }
@@ -126,6 +128,7 @@ export interface Order {
   signature?: string;
   wave?: string; // picked together with other orders, sort at packing
   pickedBy?: string;
+  pickStats?: { scan: number; manual: number }; // how the pick stops were confirmed
   packed?: boolean; // packing check signed off
   cartons?: number; // number of cartons / packages for this customer
   packedBy?: string;
@@ -418,4 +421,14 @@ export interface CountSession {
   by: string;
   lines: CountLine[];
   postedAt?: number;
+}
+
+export interface Handover {
+  id: string;
+  at: number;
+  by: string;
+  shift: "Morning" | "Evening" | "Night";
+  text: string;
+  important: boolean;
+  ackBy: string[]; // initials of people who have read it
 }

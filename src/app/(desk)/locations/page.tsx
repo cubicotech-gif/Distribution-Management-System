@@ -1,5 +1,7 @@
 "use client";
-import { useMemo, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { can } from "@/lib/perm";
 import { Ban, CheckCircle2, MoveRight, Pencil, Plus, Printer, Search, Trash2, X } from "lucide-react";
 import { useStore, useUser } from "@/lib/store";
 import { fmt, monthsLeft } from "@/lib/calc";
@@ -18,7 +20,8 @@ const TONE: Record<Fill, { border: string; bg: string; bar: string; label: strin
   blocked: { border: "var(--ink-3)", bg: "repeating-linear-gradient(45deg, var(--mute-bg), var(--mute-bg) 6px, transparent 6px, transparent 12px)", bar: "var(--ink-3)", label: "Blocked" },
 };
 
-export default function Locations() {
+function LocationsInner() {
+  const params = useSearchParams();
   const products = useStore((s) => s.products);
   const bins = useStore((s) => s.bins);
   const upsertBin = useStore((s) => s.upsertBin);
@@ -27,11 +30,11 @@ export default function Locations() {
   const move = useStore((s) => s.moveStock);
   const user = useUser();
   const by = user?.initials ?? "—";
-  const canEdit = user?.role === "warehouse";
+  const canEdit = can(user, "locations");
   const [view, setView] = useViewMode("locations", "tiles");
   const [zone, setZone] = useState("all");
   const [flt, setFlt] = useState<"all" | Fill>("all");
-  const [q, setQ] = useState("");
+  const [q, setQ] = useState(params.get("q") ?? "");
   const [sel, setSel] = useState<string | null>(null);
   const [mv, setMv] = useState<{ p: Product; b: Batch } | "free" | null>(null);
   const [form, setForm] = useState<Bin | null>(null);
@@ -195,6 +198,10 @@ export default function Locations() {
       <div className="hidden">{DOCK}</div>
     </div>
   );
+}
+
+export default function Locations() {
+  return <Suspense><LocationsInner /></Suspense>;
 }
 
 function MoveModal({ start, onClose }: { start: { p: Product; b: Batch } | null; onClose: () => void }) {

@@ -4,12 +4,13 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ClipboardList, FileText, Truck, Boxes, Users, Wallet, PackageCheck, LayoutGrid, Package, Search,
-  Moon, Sun, LogOut, Command, RotateCcw, Plus, ArrowRight, ShieldCheck, BarChart3, UserCog, Landmark, Route, Undo2, Gauge, MapPinned, Building2, History, MapPin, ArrowDownToLine, PackageOpen, ClipboardCheck,
+  Moon, Sun, LogOut, Command, RotateCcw, Plus, ArrowRight, ShieldCheck, BarChart3, UserCog, Landmark, Route, Undo2, Gauge, MapPinned, Building2, History, MapPin, ArrowDownToLine, PackageOpen, ClipboardCheck, FileSpreadsheet, Hand,
 } from "lucide-react";
 import { HOME, useStore, useUser } from "@/lib/store";
 import type { Role } from "@/lib/types";
 import { Avatar, ConfirmHost, Kbd, Modal, Toaster, ask, useHydrated, toast } from "./ui";
 import SkeletonPage from "./Skeleton";
+import { ACTION_BY_PATH, WH_ROLE_LABEL, can } from "@/lib/perm";
 import { abcClasses, dueInfo } from "@/lib/counts";
 
 type Badge = "counts" | "pack" | "putaway" | "orders" | "pick" | "invoice" | "receive" | "approvals" | "returns" | "dispatch" | "settle" | "plan";
@@ -38,6 +39,7 @@ const NAV: Nav[] = [
   { href: "/returns", label: "Returns", icon: Undo2, roles: ["warehouse"], badge: "returns" },
   { href: "/locations", label: "Locations", icon: MapPin, roles: ["warehouse", "admin"] },
   { href: "/counts", label: "Counts", icon: ClipboardCheck, roles: ["warehouse", "admin"], badge: "counts" },
+  { href: "/wh-reports", label: "Warehouse reports", icon: FileSpreadsheet, roles: ["warehouse", "purchasing", "admin"] },
   // Purchasing
   { href: "/planner", label: "Reorder planner", icon: Gauge, roles: ["purchasing"], badge: "plan" },
   { href: "/receiving", label: "Orders & GRN", icon: PackageCheck, roles: ["purchasing"], badge: "receive" },
@@ -63,6 +65,20 @@ export function useTheme() {
   return { t, toggle };
 }
 
+export function useDensity() {
+  const [d, setD] = useState<"comfortable" | "touch">("comfortable");
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem("density") as "comfortable" | "touch" | null;
+      const auto = window.matchMedia("(pointer: coarse)").matches || window.innerWidth < 1100;
+      const pick = v ?? (auto ? "touch" : "comfortable");
+      setD(pick); document.documentElement.dataset.density = pick;
+    } catch {}
+  }, []);
+  const toggle = () => { const n = d === "touch" ? "comfortable" : "touch"; setD(n); document.documentElement.dataset.density = n; try { localStorage.setItem("density", n); } catch {} };
+  return { d, toggle };
+}
+
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const hydrated = useHydrated();
   const user = useUser();
@@ -73,6 +89,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const logout = useStore((s) => s.logout);
   const reset = useStore((s) => s.reset);
   const { t, toggle } = useTheme();
+  const { d: density, toggle: toggleDensity } = useDensity();
   const [pal, setPal] = useState(false);
   const [help, setHelp] = useState(false);
   const [ready, setReady] = useState(false);
@@ -203,10 +220,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <Kbd>Ctrl</Kbd><Kbd>K</Kbd>
           </button>
           <span className="chip chip-mute">Lahore Depot</span>
+          <button className={`btn h-9 w-9 justify-center px-0 ${density === "touch" ? "border-accent text-accent" : ""}`} onClick={toggleDensity} title={density === "touch" ? "Touch mode is on (bigger buttons). Click to switch off" : "Touch mode: bigger buttons for tablets"}><Hand size={15} /></button>
           <button className="btn h-9 w-9 justify-center px-0" onClick={toggle} title="Toggle theme">
             {t === "dark" ? <Sun size={15} /> : <Moon size={15} />}
           </button>
         </header>
+        {user.role === "warehouse" && (() => { const need = ACTION_BY_PATH.find(([p]) => path.startsWith(p))?.[1]; return need && !can(user, need) ? <div className="bg-[var(--info-bg)] px-5 py-1.5 text-center text-xs font-semibold text-[var(--info-fg)]">View only. Your role ({WH_ROLE_LABEL[user.whRole ?? "storekeeper"]}) cannot make changes on this screen. Ask the storekeeper.</div> : null; })()}
         {!online && <div className="bg-[var(--warn-bg)] px-5 py-1.5 text-center text-xs font-semibold text-[var(--warn-fg)]">You are offline. Changes are kept on this device and will not reach other devices until the connection returns.</div>}
         <main className="min-h-0 flex-1 overflow-auto p-4">{ready ? children : <SkeletonPage kind={kind} />}</main>
       </div>
@@ -223,6 +242,8 @@ function Palette({ onClose, role }: { onClose: () => void; role: Role }) {
   const customers = useStore((s) => s.customers);
   const products = useStore((s) => s.products);
   const orders = useStore((s) => s.orders);
+  const bins = useStore((s) => s.bins);
+  const grns = useStore((s) => s.grns);
   const [q, setQ] = useState("");
   const [i, setI] = useState(0);
   const inp = useRef<HTMLInputElement>(null);
@@ -236,14 +257,20 @@ function Palette({ onClose, role }: { onClose: () => void; role: Role }) {
     if (ql) {
       for (const o of orders) {
         const c = customers.find((x) => x.id === o.customerId);
-        if ((o.folio + " " + (o.invoiceNo ?? "") + " " + (c?.name ?? "")).toLowerCase().includes(ql))
-          out.push({ group: "Orders", label: `${o.folio} · ${c?.name}`, go: `/orders?id=${o.id}` });
+        if ((o.folio + " " + (o.invoiceNo ?? "") + " " + (o.challanNo ?? "") + " " + (role === "warehouse" ? "" : c?.name ?? "")).toLowerCase().includes(ql))
+          out.push({ group: "Orders", label: `${o.folio} · ${c?.name}${o.challanNo ? ` · ${o.challanNo}` : ""}`, go: role === "warehouse" ? "/pick" : `/orders?id=${o.id}` });
       }
-      for (const c of customers) if (c.name.toLowerCase().includes(ql)) out.push({ group: "Customers", label: c.name, sub: c.area, go: `/customers?id=${c.id}` });
+      if (role === "warehouse" || role === "purchasing" || role === "admin") {
+        const seen = new Set<string>();
+        for (const p of products) for (const b of p.batches) { const k = `${p.id}|${b.no}`; if (!seen.has(k) && (b.no + " " + p.name).toLowerCase().includes(ql)) { seen.add(k); out.push({ group: "Batches", label: `${b.no} · ${p.name}`, sub: b.bin, go: `/stock?tab=trace&product=${p.id}&batch=${b.no}` }); } }
+        for (const bn of bins) if (bn.code.toLowerCase().includes(ql)) out.push({ group: "Bins", label: bn.code, sub: bn.note ?? "", go: `/locations?q=${bn.code}` });
+        for (const g of grns) if ((g.folio + " " + g.deliveryNote + " " + g.supplier).toLowerCase().includes(ql)) out.push({ group: "GRN", label: `${g.folio} · ${g.supplier}`, sub: g.deliveryNote, go: "/receiving" });
+      }
+      if (role !== "warehouse") for (const c of customers) if (c.name.toLowerCase().includes(ql)) out.push({ group: "Customers", label: c.name, sub: c.area, go: `/customers?id=${c.id}` });
       for (const p of products) if ((p.name + p.code).toLowerCase().includes(ql)) out.push({ group: "Products", label: p.name, sub: p.code, go: `/stock?q=${encodeURIComponent(p.name)}` });
     }
     return out.filter((x) => !ql || x.group !== "Go to" && x.group !== "Create" || (x.label + x.group).toLowerCase().includes(ql)).slice(0, 12);
-  }, [q, role, customers, products, orders]);
+  }, [q, role, customers, products, orders, bins, grns]);
 
   const go = (h: string) => { onClose(); router.push(h); };
   return (

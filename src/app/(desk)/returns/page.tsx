@@ -1,5 +1,6 @@
 "use client";
 import { useMemo, useState } from "react";
+import { can } from "@/lib/perm";
 import { Camera, Printer } from "lucide-react";
 import { useStore, useUser } from "@/lib/store";
 import { ago, fmt } from "@/lib/calc";
@@ -29,7 +30,7 @@ export default function Returns() {
   const finish = useStore((s) => s.completeDestruction);
   const user = useUser();
   const by = user?.initials ?? "—";
-  const canAct = user?.role === "warehouse";
+  const canAct = can(user, "returns");
   const [tab, setTab] = useState<Tab>("coming");
   const [rec, setRec] = useState<ReturnNote | null>(null);
   const [gr, setGr] = useState<ReturnNote | null>(null);

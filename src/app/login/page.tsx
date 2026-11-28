@@ -3,6 +3,7 @@ import { useRouter } from "next/navigation";
 import { ClipboardList, Truck, PackageCheck, ShieldCheck, Smartphone, Wallet } from "lucide-react";
 import { HOME, useStore } from "@/lib/store";
 import { Avatar, useHydrated } from "@/components/ui";
+import { homeFor } from "@/lib/perm";
 
 const ICON: Record<string, React.ReactNode> = {
   admin: <ShieldCheck size={18} />, sales: <ClipboardList size={18} />, warehouse: <Truck size={18} />,
@@ -12,6 +13,9 @@ const DESC: Record<string, string> = {
   admin: "Read-only dashboards, approvals for exceptions, reports, team targets",
   sales: "Orders, invoices, recovery, trip settlement, customers and prices",
   warehouse: "Receive and count, pick by expiry, load trucks, inspect returns",
+  storekeeper: "Everything in the warehouse: inbound, putaway, counts, returns, stock",
+  picker: "Picks and packs orders. Other screens are view only",
+  loader: "Loads trucks and dispatches. Other screens are view only",
   purchasing: "Reorder planner, factory POs, GRN approval, supplier returns",
   booker: "Mobile: route, book orders, live stock",
   delivery: "Mobile: today's deliveries, signature",
@@ -23,7 +27,7 @@ export default function Login() {
   const login = useStore((s) => s.login);
   const router = useRouter();
   const ok = useHydrated();
-  const enter = (id: string, role: keyof typeof HOME) => { login(id); router.push(HOME[role]); };
+  const enter = (id: string, role: keyof typeof HOME) => { login(id); const u = users.find((x) => x.id === id); router.push((u && homeFor(u)) ?? HOME[role]); };
   const desk = users.filter((u) => !["booker", "delivery", "recovery"].includes(u.role));
   const field = users.filter((u) => ["booker", "delivery", "recovery"].includes(u.role));
   return (
@@ -48,7 +52,7 @@ export default function Login() {
                 <span className="grid h-10 w-10 place-items-center rounded-xl bg-accentsoft text-accent">{ICON[u.role]}</span>
                 <span className="flex-1">
                   <span className="block text-[14px] font-semibold">{u.title}</span>
-                  <span className="block text-xs text-ink2">{DESC[u.role]}</span>
+                  <span className="block text-xs text-ink2">{DESC[u.whRole ?? u.role]}</span>
                 </span>
                 <Avatar initials={u.initials} size={26} />
               </button>
@@ -61,7 +65,7 @@ export default function Login() {
                 <span className="grid h-10 w-10 place-items-center rounded-xl bg-accentsoft text-accent">{ICON[u.role]}</span>
                 <span className="flex-1">
                   <span className="block text-[14px] font-semibold">{u.title}</span>
-                  <span className="block text-xs text-ink2">{DESC[u.role]}</span>
+                  <span className="block text-xs text-ink2">{DESC[u.whRole ?? u.role]}</span>
                 </span>
                 <Avatar initials={u.initials} size={26} />
               </button>

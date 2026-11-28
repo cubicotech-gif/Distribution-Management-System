@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { can } from "@/lib/perm";
 import Link from "next/link";
 import { Lock, Printer, ScanLine } from "lucide-react";
 import { useStore, useUser } from "@/lib/store";
@@ -34,7 +35,7 @@ export default function Pick() {
   const pickWave = useStore((s) => s.pickWave);
   const user = useUser();
   const by = user?.initials ?? "—";
-  const canAct = user?.role === "warehouse";
+  const canAct = can(user, "pick");
   const [busy, run] = useBusy();
   const queue = orders.filter((o) => o.status === "approved");
   const toPack = orders.filter((o) => o.status === "picked" && !o.packed);
@@ -108,7 +109,7 @@ export default function Pick() {
       if (!(await ask({ title: `Pick ${wavers.length} orders together?`, body: "Stock is deducted by batch for all of them and each order gets its own challan. Sort the cartons by customer at the packing table.", confirm: "Confirm wave pick" }))) return;
       run(() => { const r = pickWave(wavers.map((o) => o.id), by); toast(`${r.done} orders picked together${r.short ? `. ${r.short} line(s) were short` : ""}`); setWave([]); setMode("single"); setSel(null); });
     } else if (cur) {
-      run(() => { pick(cur.id, vals[cur.id] ?? {}, why[cur.id] ?? {}, by); toast(`Challan created for ${cur.folio}. Send it to the packing table`); });
+      run(() => { pick(cur.id, vals[cur.id] ?? {}, why[cur.id] ?? {}, by, { scan: Object.values(mine).filter((v) => v === "scan").length, manual: Object.values(mine).filter((v) => v === "manual").length }); toast(`Challan created for ${cur.folio}. Send it to the packing table`); });
     }
   };
   useEffect(() => {

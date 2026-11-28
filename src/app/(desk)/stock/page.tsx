@@ -1,5 +1,6 @@
 "use client";
 import { Suspense, useState } from "react";
+import { can } from "@/lib/perm";
 import { useRouter, useSearchParams } from "next/navigation";
 import LedgerTab from "@/components/stock/LedgerTab";
 import ExpiryTab from "@/components/stock/ExpiryTab";
@@ -20,7 +21,7 @@ function StockTab({ onLedger, onTrace }: { onLedger: (productId: string) => void
   const router = useRouter();
   const user = useUser();
   const role = user?.role;
-  const canCount = role === "warehouse";
+  const canCount = can(user, "count");
   const showCost = role === "admin" || role === "purchasing";
   const [q, setQ] = useState(params.get("q") ?? "");
   const [view, setView] = useViewMode("stock", "table");
@@ -129,7 +130,7 @@ function Shell() {
   const params = useSearchParams();
   const [tab, setTab] = useState<Tab>((params.get("tab") as Tab) || "stock");
   const [ledgerFor, setLedgerFor] = useState<string | undefined>();
-  const [trace, setTrace] = useState<{ productId: string; batch: string } | undefined>();
+  const [trace, setTrace] = useState<{ productId: string; batch: string } | undefined>(params.get("product") && params.get("batch") ? { productId: params.get("product")!, batch: params.get("batch")! } : undefined);
   const tabs: [Tab, string][] = [["stock", "Stock"], ["ledger", "Movement ledger"], ["expiry", "Expiry"], ["trace", "Trace & recall"], ["ageing", "Ageing"]];
   return (
     <div className="flex h-full flex-col gap-3">

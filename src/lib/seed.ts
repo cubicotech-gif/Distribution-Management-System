@@ -1,9 +1,11 @@
-import type { Allocation, Bin, Customer, Grn, Order, Payment, PriceList, Product, PurchaseOrder, User, Line, OrderStatus, Stamp, ReturnNote, Route, Scheme, StockEntry, Supplier, Trip } from "./types";
+import type { Allocation, Bin, Handover, Customer, Grn, Order, Payment, PriceList, Product, PurchaseOrder, User, Line, OrderStatus, Stamp, ReturnNote, Route, Scheme, StockEntry, Supplier, Trip } from "./types";
 
 export const USERS: User[] = [
   { id: "u-admin", name: "Zarie Khan", initials: "ZK", role: "admin", title: "Owner" },
   { id: "u-sales", name: "Kamran Hussain", initials: "KH", role: "sales", title: "Back Office" },
-  { id: "u-wh", name: "Imran Ali", initials: "IA", role: "warehouse", title: "Warehouse" },
+  { id: "u-wh", name: "Imran Ali", initials: "IA", role: "warehouse", whRole: "storekeeper", title: "Warehouse · Storekeeper" },
+  { id: "u-wh2", name: "Danish Khan", initials: "DK", role: "warehouse", whRole: "picker", title: "Warehouse · Picker" },
+  { id: "u-wh3", name: "Hamid Raza", initials: "HR", role: "warehouse", whRole: "loader", title: "Warehouse · Loader" },
   { id: "u-pur", name: "Saima Noor", initials: "SN", role: "purchasing", title: "Purchasing" },
   { id: "u-b1", name: "Muhammad Sabir", initials: "MS", role: "booker", title: "Booker", target: 1500000, baseline: 920000 },
   { id: "u-b2", name: "Zeeshan Ahmed", initials: "ZA", role: "booker", title: "Booker", target: 1400000, baseline: 1180000 },
@@ -299,3 +301,15 @@ for (const o of ORDERS) {
     o.cartons = Math.max(1, Math.round(o.lines.reduce((s, l) => { const p = PRODUCTS.find((x) => x.id === l.productId)!; return s + (l.unit === "ctn" ? l.qty : l.qty / p.packSize); }, 0)));
   }
 }
+
+// Who picked the seed orders and how: gives the pick-accuracy report something to compare.
+(function seedPickers() {
+  const who: Record<string, [string, number, number]> = { o36: ["DK", 4, 0], o35: ["IA", 2, 2], o34: ["DK", 1, 0], o39: ["IA", 3, 1] };
+  for (const o of ORDERS) { const w = who[o.id]; if (w) { o.pickedBy = w[0]; o.pickStats = { scan: w[1], manual: w[2] }; } }
+  const o35 = ORDERS.find((o) => o.id === "o35"); if (o35) o35.lines[0].shortReason = "Not enough on shelf";
+})();
+
+export const HANDOVERS: Handover[] = [
+  { id: "hv1", at: Date.now() - 9 * 3600_000, by: "IA", shift: "Evening", important: true, ackBy: ["IA"], text: "Rack A-07-1 shelf is cracked and blocked. Do not use until maintenance fixes it. Dalda delivery is at the dock waiting for putaway." },
+  { id: "hv2", at: Date.now() - 20 * 3600_000, by: "DK", shift: "Morning", important: false, ackBy: ["DK", "IA"], text: "Tapal truck was 6 hours late. Count is done, waiting for purchasing approval." },
+];
